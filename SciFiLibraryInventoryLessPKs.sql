@@ -9,10 +9,6 @@ SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='TRADITIONAL,ALLOW_INVALID_DATES';
 -- -----------------------------------------------------
 -- Schema booklibinventory
 -- -----------------------------------------------------
-
--- -----------------------------------------------------
--- Schema booklibinventory
--- -----------------------------------------------------
 CREATE SCHEMA IF NOT EXISTS `booklibinventory` DEFAULT CHARACTER SET utf8 ;
 USE `booklibinventory` ;
 
@@ -361,15 +357,15 @@ BEGIN
     
     -- If the author isn't found then the user has to add the author before they add any books or
     -- Series by the author.
-    if @authorKey != NULL then
+    if @authorKey IS NOT NULL then
         SET @formatKey = getformatKeyFromStr(BookFormatStr);
-        IF @formatKey != NULL THEN
+        IF @formatKey IS NOT NULL THEN
             SET @seriesKey = findSeriesKeyByAuthKeyTitle(@authorKey, @SeriesName);
             SET @titleKey = InsertTitleIfNotExist(titleStr);
             SET @categoryKey = getCategoryKeyFromStr(categoryName);
             
             SET @bookKey = findbookKeyFromKeys(@authorKey, @titleKey, @formatKey);
-            IF @bookKey = NULL THEN
+            IF @bookKey IS NULL THEN
                 -- Don't add a book if it is already in the library. There will be special cases such as when a book has been signed by the author
                 -- but these will be added later.
                 INSERT INTO bookinfo (bookinfo.AuthorFKbi, bookinfo.TitleFKbi, bookinfo.CategoryFKbi, bookinfo.BookFormatFKbi, bookinfo.SeriesFKbi)
@@ -378,7 +374,7 @@ BEGIN
                 SET bookKey = findbookKeyFromKeys(@authorKey, @titleKey, @formatKey);
                 
                 CALL addOrUpdatePublishing(@bookKey, copyright, edition, printing, publisher, outOfPrint);
-                IF iSBNumber != NULL OR LENGTH(iSBNumber) < 1 THEN
+                IF iSBNumber IS NOT NULL OR LENGTH(iSBNumber) > 1 THEN
                     -- Books older than 1985 may not have an isbn printed on them any where.
                     CALL addOrUpdateISBN(@bookKey, iSBNumber);
                 END IF;
@@ -389,7 +385,7 @@ BEGIN
                     CALL addOrUpdateForSale(@bookKey, isForSale, askingPrice, estimatedValue);
                 END IF;
                 CALL addOrUpdateIsSignedByAuthor(@bookKey, iSignedByAuthor);
-                IF bookDescription != NULL OR LENGTH(bookDescription) < 1 THEN
+                IF bookDescription IS NOT NULL OR LENGTH(bookDescription) < 1 THEN
                     -- Try to save space if there is no description.
                     CALL addOrUpdateBookDescription(@bookKey, bookDescription);
                 END IF;
@@ -467,7 +463,7 @@ BEGIN
         @bookKey
     );
     
-    IF @bookKey != NULL AND @bookKey > 0 THEN
+    IF @bookKey IS NOT NULL AND @bookKey > 0 THEN
         CALL addOrUpdatePurchaseInfo(@bookKey, purchaseDate, listPrice, pricePaid, vendor);
     END IF;
     
@@ -487,15 +483,23 @@ USE `booklibinventory`$$
 CREATE FUNCTION `findAuthorKey`(
     firstName VARCHAR(20),
     lastName VARCHAR(20)
-) RETURNS int(11)
+) RETURNS INT
 BEGIN
     
-    DECLARE authorKey INT DEFAULT 0;
+    DECLARE authorKeyKey, authorCount INT;
     
-    SELECT authorsTab.idAuthors INTO @authorKey
-        FROM authorsTab
-        WHERE authorsTab.LastName = lastName AND authorsTab.FirstName = firstName;
-    
+    SELECT COUNT(*) INTO authorCount FROM authorstab;
+    IF authorCount > 0 THEN
+        SELECT authorstab.idAuthors INTO @authorKey
+            FROM authorstab
+            WHERE authorsTab.LastName = lastName AND authorsTab.FirstName = firstName;
+        IF @authorKey IS NULL THEN
+            SET @authorKey = 0;
+        END IF;
+    ELSE
+        SET @authorKey = 0;
+    END IF;
+
     RETURN @authorKey;
     
 END$$
@@ -527,7 +531,7 @@ BEGIN
     
     SET @formatKey = getformatKeyFromStr(formatStr);
     
-    IF authorKey != NULL AND titleKey != NULL THEN
+    IF authorKey > 0 AND titleKey > 0 THEN
         SET bookKey = findbookKeyFromKeys(@authorKey, @titleKey, @formatKey);
     END IF;
     
@@ -555,7 +559,7 @@ BEGIN
 
     DECLARE bookKey INT DEFAULT NULL;
     
-    IF authorKey != NULL AND titleKey != NULL then
+    IF authorKey IS NOT NULL AND titleKey IS NOT NULL then
         SELECT bookinfo.idBookInfo INTO @bookKey 
             FROM BookInfo 
             WHERE bookinfo.AuthorFKbi = authorKey AND bookinfo.TitleFKbi = titleKey AND bookinfo.FormatFKbi = formatKey;
@@ -587,28 +591,6 @@ BEGIN
     
     RETURN titleKey;
     
-END$$
-
-DELIMITER ;
-
--- -----------------------------------------------------
--- procedure getAllBookFormatsWithKeys
--- -----------------------------------------------------
-
-USE `booklibinventory`;
-DROP procedure IF EXISTS `booklibinventory`.`getAllBookFormatsWithKeys`;
-
-DELIMITER $$
-USE `booklibinventory`$$
-CREATE PROCEDURE `getAllBookFormatsWithKeys`()
-BEGIN
-
-/*
- * Example usage would be to get all the formats to CREATE a control embeds the primary key rather than the text.
- */
-
-    SELECT bookformat.FormatName, bookformat.idFormat FROM bookformat;
-
 END$$
 
 DELIMITER ;
@@ -661,6 +643,28 @@ END$$
 DELIMITER ;
 
 -- -----------------------------------------------------
+-- procedure getAllSeriesData
+-- -----------------------------------------------------
+
+USE `booklibinventory`;
+DROP procedure IF EXISTS `booklibinventory`.`getAllSeriesData`;
+
+DELIMITER $$
+USE `booklibinventory`$$
+CREATE PROCEDURE `getAllSeriesData`()
+BEGIN
+
+    SELECT a.LastName, a.FirstName, s.SeriesName
+        FROM series AS s
+        INNER JOIN authorstab AS a
+        ON a.idAuthors = s.AuthorFK
+        ORDER BY a.LastName, a.FirstName, s.SeriesName;
+
+END$$
+
+DELIMITER ;
+
+-- -----------------------------------------------------
 -- procedure getBookData
 -- -----------------------------------------------------
 
@@ -685,68 +689,6 @@ BEGIN
     SET @whereClause = CONCAT('tmp.idBookInfo = ', @bookKey);
     
     CALL getAllBooDataWhere(@whereClause);
-    
-/*
-    SELECT
-        a.LastName,
-        a.FirstName,
-        t.TitleStr,
-        bf.FormatName,
-        BCat.CategoryName,
-        i.ISBNumber,
-        pub.Copyright, 
-        pub.Edition, 
-        pub.Publisher, 
-        pub.Copyright, 
-        pub.Copyright, 
-        s.SeriesName,
-        v.VolumeNumber,
-        pur.PurchaseDate,
-        pur.ListPrice,
-        pur.PaidPrice,
-        pur.OutOfPrint,
-        sba.Printing,
-        o.IsOwned,
-        o.IsWishListed,
-        hr.HaveReadBook,
-        fs.IsForSale,
-        fs.AskingPrice,
-        fs.EstimatedValue,
-        BDesc.BookDescription
-    FROM BookInfo AS B
-    LEFT JOIN (
-        AuthorsTab AS a,
-        Title AS t,
-        ISBN AS i,
-        BookFormat AS bf,
-        BookCategories AS BCat,
-        SignedByAuthor AS sba,
-        PurchasInfo AS pur,
-        PublishingInfo AS pub,
-        Series AS s,
-        VolumeInSeries AS v,
-        Owned AS o,
-        ForSale AS fs,
-        HaveRead AS hr,
-        BookDescription AS BDesk
-    ) ON (
-        a.idAuthors = tmp.AuthorFKib,
-        t.idTitle = tmp.TitleFK,
-        bf.idFormat = tmp.BookFormatFKBi,
-        BCat.idBookCategories = tmp.CategoryFKbI,
-        s.idSeries = tmp.SeriesFK,
-        v.BookFK = tmp.idBookInfo,
-        sba.BookFKsba = tmp.idBookInfo,
-        pub.BookFKPubI = tmp.idBookInfo,
-        pur.BookFKPurI = tmp.idBookInfo,
-        o.BookFK = tmp.idBookInfo,
-        fr.BookFK = tmp.idBookInfo,
-        hr.BookFK = tmp.idBookInfo,
-        i.BookFK = tmp.idBookInfo,
-        BDesk.BookFKbd = tmp.idBookInfo
-    )
-    WHERE BookInfo.idBookInfo = bookKey;
-*/
 
 END$$
 
@@ -782,31 +724,6 @@ END$$
 DELIMITER ;
 
 -- -----------------------------------------------------
--- function getFormatKeyFromStr
--- -----------------------------------------------------
-
-USE `booklibinventory`;
-DROP function IF EXISTS `booklibinventory`.`getFormatKeyFromStr`;
-
-DELIMITER $$
-USE `booklibinventory`$$
-CREATE FUNCTION `getFormatKeyFromStr`(
-    formatStr VARCHAR(45)
-) RETURNS int(11)
-BEGIN
-
-    DECLARE formatKey INT DEFAULT NULL;
-
-    SELECT bookformat.idFormat INTO @formatKey
-        FROM bookformat
-        WHERE bookformat.FormatName = formatStr;
-    
-    RETURN formatKey;
-END$$
-
-DELIMITER ;
-
--- -----------------------------------------------------
 -- function insertTitleIfNotExist
 -- -----------------------------------------------------
 
@@ -823,7 +740,7 @@ BEGIN
     DECLARE titleKey INT DEFAULT NULL;
 
     SET titleKey = findtitleKey(TitleStr);
-    if titleKey = NULL then
+    if titleKey IS NULL then
         INSERT INTO title (title.TitleStr) VALUES(TitleStr);
         SET titleKey = findtitleKey(titleStr);
     END IF;
@@ -1057,7 +974,7 @@ BEGIN
     
     SELECT publishinginfo.Copyright INTO @testCopyright FROM publishinginfo WHERE publishinginfo.BookFK = bookKey;
     
-    IF @testCopyright = NULL THEN
+    IF @testCopyright IS NULL THEN
         INSERT INTO publishinginfo (
                 publishinginfo.BookFK,
                 publishinginfo.Copyright,
@@ -1110,7 +1027,7 @@ BEGIN
     
     SELECT owned.BookFKo INTO @testKey FROM owned WHERE owned.BookFKo = bookKey;
     
-    IF @testKey = NULL THEN
+    IF @testKey IS NULL THEN
         INSERT INTO owned (
                 owned.BookFKo,
                 owned.IsOwned,
@@ -1154,7 +1071,7 @@ BEGIN
     
     SELECT haveread.BookFKhr INTO @testKey FROM haveread WHERE haveread.BookFKhr = bookKey;
     
-    IF @testKey = NULL THEN
+    IF @testKey IS NULL THEN
         INSERT INTO haveread (
                 haveread.BookFKhr,
                 haveread.HaveReadBook
@@ -1196,7 +1113,7 @@ BEGIN
     
     SELECT volumeinseries.BookFKo INTO @testKey FROM volumeinseries WHERE volumeinseries.BookFKo = bookKey;
     
-    IF @testKey = NULL THEN
+    IF @testKey IS NULL THEN
         INSERT INTO volumeinseries (
                 volumeinseries.BookFKvs,
                 volumeinseries.SeriesFK,
@@ -1242,7 +1159,7 @@ BEGIN
     
     SELECT forsale.BookFKfs INTO @testKey FROM forsale WHERE forsale.BookFKfs = bookKey;
     
-    IF @testKey = NULL THEN
+    IF @testKey IS NULL THEN
         INSERT INTO forsale (
                 forsale.BookFKcs,
                 forsale.IsForSale,
@@ -1289,7 +1206,7 @@ BEGIN
     
     SELECT signedbyauthor.BookFKsba INTO @testKey FROM signedbyauthor WHERE signedbyauthor.BookFKsba = bookKey;
     
-    IF @testKey = NULL THEN
+    IF @testKey IS NULL THEN
         INSERT INTO signedbyauthor (
                 signedbyauthor.BookFKsba,
                 signedbyauthor.IsSignedByAuthor
@@ -1330,7 +1247,7 @@ BEGIN
     
     SELECT bookdescription.BookFKbd INTO @testKey FROM bookdescription WHERE bookdescription.BookFKbd = bookKey;
     
-    IF @testKey = NULL THEN
+    IF @testKey IS NULL THEN
         INSERT INTO bookdescription (
                 bookdescription.BookFKbd,
                 bookdescription.BookDescription
@@ -1371,7 +1288,7 @@ BEGIN
     
     SELECT isbn.BookFKiSBN INTO @testKey FROM isbn WHERE isbn.BookFKiSBN = bookKey;
     
-    IF @testKey = NULL THEN
+    IF @testKey IS NULL THEN
         INSERT INTO isbn (
                 isbn.BookFKiSBN,
                 isbn.ISBNumber
@@ -1415,7 +1332,7 @@ BEGIN
     
     SELECT purchaseinfo.BookFKPurI INTO @testKey FROM purchaseinfo WHERE purchaseinfo.BookFK = bookKey;
     
-    IF @testKey = NULL THEN
+    IF @testKey IS NULL THEN
         INSERT INTO purchaseinfo
             (
                 purchaseinfo.BookFKPurI,
@@ -1447,6 +1364,40 @@ END$$
 DELIMITER ;
 
 -- -----------------------------------------------------
+-- function getCategoryKeyFromStr
+-- -----------------------------------------------------
+
+USE `booklibinventory`;
+DROP function IF EXISTS `booklibinventory`.`getCategoryKeyFromStr`;
+
+DELIMITER $$
+USE `booklibinventory`$$
+CREATE FUNCTION `getCategoryKeyFromStr`
+(
+    categoryName VARCHAR(45)
+)
+RETURNS INT
+BEGIN
+    DECLARE categoryKey, categoryCount INT DEFAULT NULL;
+    
+    SELECT COUNT(*) INTO categoryCount FROM bookcategories;
+    IF categoryCount > 0 THEN
+        SELECT bookcategories.idBookCategories INTO @categoryKey
+            FROM bookcategories
+            WHERE bookcategories.CategoryName = categoryName;
+        IF @categoryKey IS NULL THEN
+            SET @categoryKey = 0;
+        END IF;
+    ELSE
+        SET @categoryKey = 0;
+    END IF;
+
+    RETURN @categoryKey;
+END$$
+
+DELIMITER ;
+
+-- -----------------------------------------------------
 -- procedure addCategory
 -- -----------------------------------------------------
 
@@ -1462,38 +1413,14 @@ CREATE PROCEDURE `addCategory`
 BEGIN
 
     DECLARE categoryKey INT;
-    
+
     SET @categoryKey = getCategoryKeyFromStr(categoryName);
     
-    IF @categoryKey = NULL or @categoryKey < 1 THEN
+    -- Prevent adding the same category again to avoid breaking the unique key structure.
+    IF @categoryKey < 1 THEN
         INSERT INTO bookcategories (bookcategories.CategoryName) VALUES(categoryName);
     END IF;
     
-END$$
-
-DELIMITER ;
-
--- -----------------------------------------------------
--- function getCategoryKeyFromStr
--- -----------------------------------------------------
-
-USE `booklibinventory`;
-DROP function IF EXISTS `booklibinventory`.`getCategoryKeyFromStr`;
-
-DELIMITER $$
-USE `booklibinventory`$$
-CREATE FUNCTION `getCategoryKeyFromStr`
-(
-    categoryName VARCHAR(45)
-)
-RETURNS INT
-BEGIN
-
-    DECLARE categoryKey INT;
-    
-    SELECT bookcategories.idBookCategories INTO @categoryKey FROM bookcategories WHERE bookcategories.CategoryName = categoryName;
-
-    RETURN @categoryKey;
 END$$
 
 DELIMITER ;
@@ -1514,8 +1441,38 @@ BEGIN
  * Example usage would be to get all the categories to CREATE a control that embeds the primary key rather than the text.
  */
 
-    SELECT bookcategory.CategoryName, bookcategory.idBookCategories FROM bookcategory;
+    SELECT bookcategories.CategoryName, bookcategories.idBookCategories FROM bookcategories;
 
+END$$
+
+DELIMITER ;
+
+-- -----------------------------------------------------
+-- function getFormatKeyFromStr
+-- -----------------------------------------------------
+
+USE `booklibinventory`;
+DROP function IF EXISTS `booklibinventory`.`getFormatKeyFromStr`;
+
+DELIMITER $$
+USE `booklibinventory`$$
+CREATE FUNCTION `getFormatKeyFromStr`(
+    bookFormatStr VARCHAR(45)
+) RETURNS int(11)
+BEGIN
+
+    DECLARE formatKey, formatCount INT DEFAULT NULL;
+    
+    SELECT COUNT(*) INTO formatCount FROM bookformat;
+    IF formatCount > 0 THEN
+        SELECT bookformat.idFormat INTO @formatKey
+            FROM bookformat
+            WHERE bookformat.FormatName = bookFormatStr;
+    ELSE
+        SET @formatKey = 0;
+    END IF;
+    
+    RETURN @formatKey;
 END$$
 
 DELIMITER ;
@@ -1536,10 +1493,33 @@ BEGIN
     
     SET @formatKey = getFormatKeyFromStr(bookFormatStr);
     
-    IF @formatKey = NULL or @formatKey < 1 THEN
+    -- Prevent adding the same format again to avoid breaking the unique key structure.
+    IF @formatKey < 1 THEN
         INSERT INTO bookformat (bookformat.FormatName) VALUES(bookFormatStr);
     END IF;
     
+END$$
+
+DELIMITER ;
+
+-- -----------------------------------------------------
+-- procedure getAllBookFormatsWithKeys
+-- -----------------------------------------------------
+
+USE `booklibinventory`;
+DROP procedure IF EXISTS `booklibinventory`.`getAllBookFormatsWithKeys`;
+
+DELIMITER $$
+USE `booklibinventory`$$
+CREATE PROCEDURE `getAllBookFormatsWithKeys`()
+BEGIN
+
+/*
+ * Example usage would be to get all the formats to CREATE a control embeds the primary key rather than the text.
+ */
+
+    SELECT bookformat.FormatName, bookformat.idFormat FROM bookformat;
+
 END$$
 
 DELIMITER ;
@@ -1565,10 +1545,12 @@ BEGIN
     
     SET @authorKey = findAuthorKey(authorFirst, authorLast);
     
-    SET @seriesKey = findSeriesKeyByAuthKeyTitle(@authorKey, @seriesTitle);
+    IF @authorKey > 0 THEN
+        SET @seriesKey = findSeriesKeyByAuthKeyTitle(@authorKey, seriesTitle);
     
-    IF @seriesKey = NULL OR @seriesKey < 1 THEN
-        INSERT INTO series (series.AuthorFK, series.SeriesName) VALUES(@authorKey, seriesTitle);
+        IF @seriesKey < 1 THEN
+            INSERT INTO series (series.AuthorFK, series.SeriesName) VALUES(@authorKey, seriesTitle);
+        END IF;
     END IF;
 
     
@@ -1600,7 +1582,7 @@ BEGIN
     
     SET @seriesKey = findSeriesKeyByAuthKeyTitle(@authorKey, seriesTitle);
         
-    RETURN seriesKey;
+    RETURN @seriesKey;
 END$$
 
 DELIMITER ;
@@ -1624,9 +1606,16 @@ BEGIN
 
     DECLARE seriesKey INT DEFAULT NULL;
         
-    SELECT series.idSeries INTO @seriesKey FROM series WHERE series.AuthorFK = @authorKey AND series.SeriesName = seriesTitle;
+    IF authorKey > 0 THEN
+        SELECT series.idSeries INTO @seriesKey FROM series WHERE series.AuthorFK = authorKey AND series.SeriesName = seriesTitle;
+        IF @seriesKey IS NULL THEN
+            SET @seriesKey = 0;
+        END IF;
+    ELSE
+        SET @seriesKey = 0;
+    END IF;
     
-    RETURN seriesKey;
+    RETURN @seriesKey;
 
 END$$
 
@@ -1672,7 +1661,7 @@ BEGIN
  */
 
     SELECT * FROM authorstab
-    ORDER BY (authorstab.LastName, authorstab.FirstName, authorstab.MiddleName);
+        ORDER BY authorstab.LastName, authorstab.FirstName, authorstab.MiddleName;
     
 END$$
 
@@ -1742,6 +1731,7 @@ BEGIN
     CALL addFormat('eBook iBooks');
     CALL addFormat('eBook EPUB');
     CALL addFormat('eBook HTML');
+SELECT COUNT(*) FROM booklibinventory.bookformat;
 
 -- Initialize some basic categories, user can add more later.
     CALL addCategory('None Fiction');
@@ -1762,6 +1752,7 @@ BEGIN
     CALL addCategory('Fiction: Romance');
     CALL addCategory('Fiction: Science Fiction');
     CALL addCategory('Fiction: Western');
+SELECT COUNT(*) FROM booklibinventory.bookcategories;
 
 END$$
 
@@ -1846,7 +1837,7 @@ USE `booklibinventory`$$
 CREATE PROCEDURE `zzzTestAddAuthors` ()
 BEGIN
 
-    DECLARE authorCount INT DEFAULT 0;
+    DECLARE authorCount, authorKey INT DEFAULT 0;
     
     CALL addAuthor('Heinlein', 'Robert', 'Anson', '1907', '1988');
     CALL addAuthor('Asimov', 'Isaac', NULL, '1920', '1992');
@@ -1859,7 +1850,7 @@ BEGIN
     CALL addAuthor('Zimmer Bradley', 'Marion', 'Eleanor', '1930', '1999');
     CALL addAuthor('Norton', 'Andre', 'Alice', '1912', '2005');
     CALL addAuthor('Drake', 'David', NULL, '1945', NULL);
-    CALL addAuthor('Webber', 'David', 'Mark', '1952', NULL);
+    CALL addAuthor('Weber', 'David', 'Mark', '1952', NULL);
     CALL addAuthor('Baxter', 'Stephen', NULL, '1957', NULL);
     
     -- SELECT COUNT(*) INTO @authorCount FROM authorstab;
@@ -1893,7 +1884,8 @@ BEGIN
 
     SELECT COUNT(*) FROM series;
     
-    SELECT * FROM series;
+    CALL getAllSeriesByThisAuthor('Weber', 'David');
+    CALL getAllSeriesData();
     
 END$$
 
@@ -1966,10 +1958,10 @@ END$$
 DELIMITER ;
 
 CALL booklibinventory.initBookInventoryTool();
-SELECT COUNT(*) FROM booklibinventory.bookcategories;
 CALL booklibinventory.getAllBookCategoriesWithKeys();
-SELECT COUNT(*) FROM booklibinventory.bookformat;
+CALL booklibinventory.getAllBookFormatsWithKeys();
 CALL booklibinventory.zzzTestAddAuthors();
+CALL booklibinventory.zzzTestAddAuthorSeries();
 
 SET SQL_MODE=@OLD_SQL_MODE;
 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS;

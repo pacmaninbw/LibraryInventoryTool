@@ -4,7 +4,8 @@ A MySQL Database with a C# user interface application for maintaining a library 
 I have over 1500 science fiction books as well as hundreds of other books. I've decided to create a tool to hellp me keep track
 of the books I own and the books I want to buy or sell.
 
-So far the repository only contains the SQL file to create the database and 48 stored procedures and functions.
+So far the repository only contains the SQL file to create the schema and more than 48 stored procedures and functions.
+Currently at least three of the procedures are unit tests.
 
 When completed this repository will containt the SQL to create the database and all the stored procedures as well as
 a C# application using MVC architecture to add, delete and update books and authors.
