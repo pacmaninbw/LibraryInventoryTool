@@ -46,13 +46,13 @@ ENGINE = InnoDB
 DEFAULT CHARACTER SET = utf8;
 
 -- -----------------------------------------------------
--- Table `booklibinventory`.`bookdescription`
+-- Table `booklibinventory`.`bksynopsis`
 -- -----------------------------------------------------
-DROP TABLE IF EXISTS `booklibinventory`.`bookdescription` ;
+DROP TABLE IF EXISTS `booklibinventory`.`bksynopsis` ;
 
-CREATE TABLE IF NOT EXISTS `booklibinventory`.`bookdescription` (
+CREATE TABLE IF NOT EXISTS `booklibinventory`.`bksynopsis` (
   `BookFKbd` INT(10) UNSIGNED NOT NULL,
-  `BookDescription` VARCHAR(1024) NULL DEFAULT NULL,
+  `StoryLine` VARCHAR(1024) NULL DEFAULT NULL,
   PRIMARY KEY (`BookFKbd`),
   INDEX `BookFKbD` (`BookFKbd` ASC))
 ENGINE = InnoDB
@@ -310,6 +310,45 @@ END$$
 DELIMITER ;
 
 -- -----------------------------------------------------
+-- function findBookKeyFast
+-- -----------------------------------------------------
+
+USE `booklibinventory`;
+DROP function IF EXISTS `booklibinventory`.`findBookKeyFast`;
+
+DELIMITER $$
+USE `booklibinventory`$$
+CREATE FUNCTION `findBookKeyFast`(
+    authorLast VARCHAR(20),
+    authorFirst VARCHAR(20),
+    titleStr VARCHAR(128),
+    formatStr VARCHAR(45)
+) RETURNS INT
+BEGIN
+
+    /*
+     * There may be multiple copies of a book in the library, one of each format.
+     * Specifying the format makes it distinct.
+     */
+
+    SELECT BKI.idBookInfo INTO @bookKey FROM bookinfo as BKI
+        INNER JOIN authorsTab AS a ON a.idAuthors = BKI.AuthorFKbi
+        INNER JOIN title AS t ON t.idTitle = BKI.TitleFKbi
+        INNER JOIN bookformat AS bf ON bf.idFormat = BKI.BookFormatFKBi
+        WHERE a.LastName = authorLast AND a.FirstName = authorFirst AND t.TitleStr = titleStr and bf.FormatName = formatStr;
+
+    IF @bookKey IS NULL THEN
+        SET @bookKey = 0;
+    END IF;
+
+    
+    RETURN @bookKey;
+        
+END$$
+
+DELIMITER ;
+
+-- -----------------------------------------------------
 -- function findBookKeyFromKeys
 -- -----------------------------------------------------
 
@@ -408,6 +447,7 @@ CREATE FUNCTION `findCategoryKeyFromStr`
 )
 RETURNS INT
 BEGIN
+
     SET @categoryKey = 0;
 
     SELECT COUNT(*) INTO @categoryCount FROM bookcategories;
@@ -515,6 +555,10 @@ BEGIN
 END$$
 
 DELIMITER ;
+
+/*
+ * Data inserts, deletions and updates.
+ */
 
 -- -----------------------------------------------------
 -- procedure UpdateAuthor
@@ -645,7 +689,7 @@ BEGIN
                 CALL insertOrUpdateIsSignedByAuthor(@bookKey, iSignedByAuthor);
                 IF bookDescription IS NOT NULL OR LENGTH(bookDescription) > 0 THEN
                     -- Try to save space if there is no description.
-                    CALL insertOrUpdateBookDescription(@bookKey, bookDescription);
+                    CALL insertOrUpdateSynopsis(@bookKey, bookDescription);
                 END IF;
             END IF;
             
@@ -725,401 +769,24 @@ END$$
 DELIMITER ;
 
 -- -----------------------------------------------------
--- procedure getAllBooksForSale
+-- procedure deleteAuthor
 -- -----------------------------------------------------
 
 USE `booklibinventory`;
-DROP procedure IF EXISTS `booklibinventory`.`getAllBooksForSale`;
+DROP procedure IF EXISTS `booklibinventory`.`deleteAuthor`;
 
 DELIMITER $$
 USE `booklibinventory`$$
-CREATE PROCEDURE `getAllBooksForSale`()
-BEGIN
-
-    SELECT
-            a.LastName,
-            a.FirstName,
-            t.TitleStr,
-            bf.FormatName,
-            BCat.CategoryName,
-            i.ISBNumber,
-            pub.Copyright,
-            pub.Edition,
-            pub.Publisher,
-            pub.OutOfPrint,
-            pub.Printing,
-            s.SeriesName,
-            v.VolumeNumber,
-            pur.PurchaseDate,
-            pur.ListPrice,
-            pur.PaidPrice,
-            pur.Vendor,
-            sba.IsSignedByAuthor,
-            o.IsOwned,
-            o.IsWishListed,
-            hr.HaveReadBook,
-            fs.IsForSale,
-            fs.AskingPrice,
-            fs.EstimatedValue,
-            BDesk.BookDescription
-        FROM bookinfo AS BKI 
-        INNER JOIN authorsTab AS a ON a.idAuthors = BKI.AuthorFKbi
-        INNER JOIN title AS t ON t.idTitle = BKI.TitleFKbi
-        INNER JOIN bookformat AS bf ON bf.idFormat = BKI.BookFormatFKBi
-        INNER JOIN bookcategories AS BCat ON BCat.idBookCategories = BKI.CategoryFKbI
-        LEFT JOIN isbn AS i ON i.BookFKiSBN = BKI.idBookInfo
-        LEFT JOIN signedbyauthor AS sba ON sba.BookFKsba = BKI.idBookInfo
-        LEFT JOIN publishinginfo AS pub ON pub.BookFKPubI = BKI.idBookInfo
-        LEFT JOIN purchaseinfo AS pur ON pur.BookFKPurI = BKI.idBookInfo
-        LEFT JOIN series AS s ON s.idSeries = BKI.SeriesFKbi
-        LEFT JOIN volumeinseries AS v ON v.BookFKvs = BKI.idBookInfo
-        LEFT JOIN owned AS o ON o.BookFKo = BKI.idBookInfo
-        LEFT JOIN forsale AS fs ON fs.BookFKfs = BKI.idBookInfo
-        LEFT JOIN haveread AS hr ON hr.BookFKhr = BKI.idBookInfo
-        LEFT JOIN bookdescription AS BDesk ON BDesk.BookFKbd = BKI.idBookInfo 
-        WHERE o.IsOwned = 1 AND fs.IsForSale = 1
-        ORDER BY a.LastName, a.FirstName, s.SeriesName, v.VolumeNumber, t.TitleStr;
-    
-END$$
-
-DELIMITER ;
-
--- -----------------------------------------------------
--- procedure getAllBooksInLib
--- -----------------------------------------------------
-
-USE `booklibinventory`;
-DROP procedure IF EXISTS `booklibinventory`.`getAllBooksInLib`;
-
-DELIMITER $$
-USE `booklibinventory`$$
-CREATE PROCEDURE `getAllBooksInLib`()
-BEGIN
-
-    SELECT
-            a.LastName,
-            a.FirstName,
-            t.TitleStr,
-            bf.FormatName,
-            BCat.CategoryName,
-            i.ISBNumber,
-            pub.Copyright,
-            pub.Edition,
-            pub.Publisher,
-            pub.OutOfPrint,
-            pub.Printing,
-            s.SeriesName,
-            v.VolumeNumber,
-            pur.PurchaseDate,
-            pur.ListPrice,
-            pur.PaidPrice,
-            pur.Vendor,
-            sba.IsSignedByAuthor,
-            o.IsOwned,
-            o.IsWishListed,
-            hr.HaveReadBook,
-            fs.IsForSale,
-            fs.AskingPrice,
-            fs.EstimatedValue,
-            BDesk.BookDescription
-        FROM bookinfo AS BKI 
-        INNER JOIN authorsTab AS a ON a.idAuthors = BKI.AuthorFKbi
-        INNER JOIN title AS t ON t.idTitle = BKI.TitleFKbi
-        INNER JOIN bookformat AS bf ON bf.idFormat = BKI.BookFormatFKBi
-        INNER JOIN bookcategories AS BCat ON BCat.idBookCategories = BKI.CategoryFKbI
-        LEFT JOIN isbn AS i ON i.BookFKiSBN = BKI.idBookInfo
-        LEFT JOIN signedbyauthor AS sba ON sba.BookFKsba = BKI.idBookInfo
-        LEFT JOIN publishinginfo AS pub ON pub.BookFKPubI = BKI.idBookInfo
-        LEFT JOIN purchaseinfo AS pur ON pur.BookFKPurI = BKI.idBookInfo
-        LEFT JOIN series AS s ON s.idSeries = BKI.SeriesFKbi
-        LEFT JOIN volumeinseries AS v ON v.BookFKvs = BKI.idBookInfo
-        LEFT JOIN owned AS o ON o.BookFKo = BKI.idBookInfo
-        LEFT JOIN forsale AS fs ON fs.BookFKfs = BKI.idBookInfo
-        LEFT JOIN haveread AS hr ON hr.BookFKhr = BKI.idBookInfo
-        LEFT JOIN bookdescription AS BDesk ON BDesk.BookFKbd = BKI.idBookInfo 
-        WHERE o.IsOwned = 1
-        ORDER BY a.LastName, a.FirstName, s.SeriesName, v.VolumeNumber, t.TitleStr;
-    
-END$$
-
-DELIMITER ;
-
--- -----------------------------------------------------
--- procedure getAllSeriesByThisAuthor
--- -----------------------------------------------------
-
-USE `booklibinventory`;
-DROP procedure IF EXISTS `booklibinventory`.`getAllSeriesByThisAuthor`;
-
-DELIMITER $$
-USE `booklibinventory`$$
-CREATE PROCEDURE `getAllSeriesByThisAuthor`(
-    IN AuthorLastName VARCHAR(20),
-    IN AuthorFirstName VARCHAR(20)
-)
-BEGIN
-
-    SELECT series.SeriesName FROM series WHERE series.AuthorFK = findauthorKey(AuthorFirstName, AuthorLastName);
-
-END$$
-
-DELIMITER ;
-
--- -----------------------------------------------------
--- procedure getAllSeriesData
--- -----------------------------------------------------
-
-USE `booklibinventory`;
-DROP procedure IF EXISTS `booklibinventory`.`getAllSeriesData`;
-
-DELIMITER $$
-USE `booklibinventory`$$
-CREATE PROCEDURE `getAllSeriesData`()
-BEGIN
-
-    SELECT a.LastName, a.FirstName, s.SeriesName
-        FROM series AS s
-        INNER JOIN authorstab AS a
-        ON a.idAuthors = s.AuthorFK
-        ORDER BY a.LastName, a.FirstName, s.SeriesName;
-
-END$$
-
-DELIMITER ;
-
--- -----------------------------------------------------
--- procedure getBookData
--- -----------------------------------------------------
-
-USE `booklibinventory`;
-DROP procedure IF EXISTS `booklibinventory`.`getBookData`;
-
-DELIMITER $$
-USE `booklibinventory`$$
-CREATE PROCEDURE `getBookData`(
-    IN authorLast VARCHAR(20),
+CREATE PROCEDURE `deleteAuthor`
+(
     IN authorFirst VARCHAR(20),
-    IN titleStr VARCHAR(128),
-    IN formatStr VARCHAR(45)
+    IN authorMiddle VARCHAR(20),
+    IN authorLast VARCHAR(20)
 )
 BEGIN
-
-    SET @bookKey = findBookKey(authorLast, authorFirst, titleStr, formatStr);
-    
-    SELECT
-            a.LastName,
-            a.FirstName,
-            t.TitleStr,
-            bf.FormatName,
-            BCat.CategoryName,
-            i.ISBNumber,
-            pub.Copyright,
-            pub.Edition,
-            pub.Publisher,
-            pub.OutOfPrint,
-            pub.Printing,
-            s.SeriesName,
-            v.VolumeNumber,
-            pur.PurchaseDate,
-            pur.ListPrice,
-            pur.PaidPrice,
-            pur.Vendor,
-            sba.IsSignedByAuthor,
-            o.IsOwned,
-            o.IsWishListed,
-            hr.HaveReadBook,
-            fs.IsForSale,
-            fs.AskingPrice,
-            fs.EstimatedValue,
-            BDesk.BookDescription
-        FROM bookinfo AS BKI 
-        INNER JOIN authorsTab AS a ON a.idAuthors = BKI.AuthorFKbi
-        INNER JOIN title AS t ON t.idTitle = BKI.TitleFKbi
-        INNER JOIN bookformat AS bf ON bf.idFormat = BKI.BookFormatFKBi
-        INNER JOIN bookcategories AS BCat ON BCat.idBookCategories = BKI.CategoryFKbI
-        LEFT JOIN isbn AS i ON i.BookFKiSBN = BKI.idBookInfo
-        LEFT JOIN signedbyauthor AS sba ON sba.BookFKsba = BKI.idBookInfo
-        LEFT JOIN publishinginfo AS pub ON pub.BookFKPubI = BKI.idBookInfo
-        LEFT JOIN purchaseinfo AS pur ON pur.BookFKPurI = BKI.idBookInfo
-        LEFT JOIN series AS s ON s.idSeries = BKI.SeriesFKbi
-        LEFT JOIN volumeinseries AS v ON v.BookFKvs = BKI.idBookInfo
-        LEFT JOIN owned AS o ON o.BookFKo = BKI.idBookInfo
-        LEFT JOIN forsale AS fs ON fs.BookFKfs = BKI.idBookInfo
-        LEFT JOIN haveread AS hr ON hr.BookFKhr = BKI.idBookInfo
-        LEFT JOIN bookdescription AS BDesk ON BDesk.BookFKbd = BKI.idBookInfo 
-        WHERE BKI.idBookInfo = @bookKey;
-
-END$$
-
-DELIMITER ;
-
--- -----------------------------------------------------
--- procedure getAllWishListBooks
--- -----------------------------------------------------
-
-USE `booklibinventory`;
-DROP procedure IF EXISTS `booklibinventory`.`getAllWishListBooks`;
-
-DELIMITER $$
-USE `booklibinventory`$$
-CREATE PROCEDURE `getAllWishListBooks`()
-BEGIN
-
-    SELECT
-            a.LastName,
-            a.FirstName,
-            t.TitleStr,
-            BCat.CategoryName,
-            pub.Copyright,
-            pub.Edition,
-            pub.Publisher,
-            pub.OutOfPrint,
-            pub.Printing,
-            s.SeriesName,
-            v.VolumeNumber,
-            o.IsOwned,
-            o.IsWishListed,
-            hr.HaveReadBook
-        FROM bookinfo AS BKI 
-        INNER JOIN authorsTab AS a ON a.idAuthors = BKI.AuthorFKbi
-        INNER JOIN title AS t ON t.idTitle = BKI.TitleFKbi
-        INNER JOIN bookcategories AS BCat ON BCat.idBookCategories = BKI.CategoryFKbI
-        LEFT JOIN publishinginfo AS pub ON pub.BookFKPubI = BKI.idBookInfo
-        LEFT JOIN series AS s ON s.idSeries = BKI.SeriesFKbi
-        LEFT JOIN volumeinseries AS v ON v.BookFKvs = BKI.idBookInfo
-        LEFT JOIN owned AS o ON o.BookFKo = BKI.idBookInfo
-        LEFT JOIN haveread AS hr ON hr.BookFKhr = BKI.idBookInfo
-        WHERE o.IsWishListed = 1
-        ORDER BY a.LastName, a.FirstName, s.SeriesName, v.VolumeNumber, t.TitleStr;
-    
-END$$
-
-DELIMITER ;
-
--- -----------------------------------------------------
--- procedure getAllBooksByThisAuthor
--- -----------------------------------------------------
-
-USE `booklibinventory`;
-DROP procedure IF EXISTS `booklibinventory`.`getAllBooksByThisAuthor`;
-
-DELIMITER $$
-USE `booklibinventory`$$
-CREATE PROCEDURE `getAllBooksByThisAuthor` 
-(
-    IN authorLastName VARCHAR(20),
-    IN authorFirstName VARCHAR(20)
-)
-BEGIN
-
-    SET @authorKey = findauthorKey(authorFirstName, authorLastName);
-
-    SELECT
-            a.LastName,
-            a.FirstName,
-            t.TitleStr,
-            bf.FormatName,
-            BCat.CategoryName,
-            i.ISBNumber,
-            pub.Copyright,
-            pub.Edition,
-            pub.Publisher,
-            pub.OutOfPrint,
-            pub.Printing,
-            s.SeriesName,
-            v.VolumeNumber,
-            pur.PurchaseDate,
-            pur.ListPrice,
-            pur.PaidPrice,
-            pur.Vendor,
-            sba.IsSignedByAuthor,
-            o.IsOwned,
-            o.IsWishListed,
-            hr.HaveReadBook,
-            fs.IsForSale,
-            fs.AskingPrice,
-            fs.EstimatedValue,
-            BDesk.BookDescription
-        FROM bookinfo AS BKI 
-        INNER JOIN authorsTab AS a ON a.idAuthors = BKI.AuthorFKbi
-        INNER JOIN title AS t ON t.idTitle = BKI.TitleFKbi
-        INNER JOIN bookformat AS bf ON bf.idFormat = BKI.BookFormatFKBi
-        INNER JOIN bookcategories AS BCat ON BCat.idBookCategories = BKI.CategoryFKbI
-        LEFT JOIN isbn AS i ON i.BookFKiSBN = BKI.idBookInfo
-        LEFT JOIN signedbyauthor AS sba ON sba.BookFKsba = BKI.idBookInfo
-        LEFT JOIN publishinginfo AS pub ON pub.BookFKPubI = BKI.idBookInfo
-        LEFT JOIN purchaseinfo AS pur ON pur.BookFKPurI = BKI.idBookInfo
-        LEFT JOIN series AS s ON s.idSeries = BKI.SeriesFKbi
-        LEFT JOIN volumeinseries AS v ON v.BookFKvs = BKI.idBookInfo
-        LEFT JOIN owned AS o ON o.BookFKo = BKI.idBookInfo
-        LEFT JOIN forsale AS fs ON fs.BookFKfs = BKI.idBookInfo
-        LEFT JOIN haveread AS hr ON hr.BookFKhr = BKI.idBookInfo
-        LEFT JOIN bookdescription AS BDesk ON BDesk.BookFKbd = BKI.idBookInfo 
-        WHERE BKI.AuthorFKbi = @authorKey
-        ORDER BY a.LastName, a.FirstName, s.SeriesName, v.VolumeNumber, t.TitleStr;
-
-END$$
-
-DELIMITER ;
-
--- -----------------------------------------------------
--- procedure getAllBooksThatWereRead
--- -----------------------------------------------------
-
-USE `booklibinventory`;
-DROP procedure IF EXISTS `booklibinventory`.`getAllBooksThatWereRead`;
-
-DELIMITER $$
-USE `booklibinventory`$$
-CREATE PROCEDURE `getAllBooksThatWereRead` 
-(
-)
-BEGIN
-
-    SELECT
-            a.LastName,
-            a.FirstName,
-            t.TitleStr,
-            bf.FormatName,
-            BCat.CategoryName,
-            i.ISBNumber,
-            pub.Copyright,
-            pub.Edition,
-            pub.Publisher,
-            pub.OutOfPrint,
-            pub.Printing,
-            s.SeriesName,
-            v.VolumeNumber,
-            pur.PurchaseDate,
-            pur.ListPrice,
-            pur.PaidPrice,
-            pur.Vendor,
-            sba.IsSignedByAuthor,
-            o.IsOwned,
-            o.IsWishListed,
-            hr.HaveReadBook,
-            fs.IsForSale,
-            fs.AskingPrice,
-            fs.EstimatedValue,
-            BDesk.BookDescription
-        FROM bookinfo AS BKI 
-        INNER JOIN authorsTab AS a ON a.idAuthors = BKI.AuthorFKbi
-        INNER JOIN title AS t ON t.idTitle = BKI.TitleFKbi
-        INNER JOIN bookformat AS bf ON bf.idFormat = BKI.BookFormatFKBi
-        INNER JOIN bookcategories AS BCat ON BCat.idBookCategories = BKI.CategoryFKbI
-        LEFT JOIN isbn AS i ON i.BookFKiSBN = BKI.idBookInfo
-        LEFT JOIN signedbyauthor AS sba ON sba.BookFKsba = BKI.idBookInfo
-        LEFT JOIN publishinginfo AS pub ON pub.BookFKPubI = BKI.idBookInfo
-        LEFT JOIN purchaseinfo AS pur ON pur.BookFKPurI = BKI.idBookInfo
-        LEFT JOIN series AS s ON s.idSeries = BKI.SeriesFKbi
-        LEFT JOIN volumeinseries AS v ON v.BookFKvs = BKI.idBookInfo
-        LEFT JOIN owned AS o ON o.BookFKo = BKI.idBookInfo
-        LEFT JOIN forsale AS fs ON fs.BookFKfs = BKI.idBookInfo
-        LEFT JOIN haveread AS hr ON hr.BookFKhr = BKI.idBookInfo
-        LEFT JOIN bookdescription AS BDesk ON BDesk.BookFKbd = BKI.idBookInfo 
-        WHERE hr.HaveReadBook = 1
-        ORDER BY a.LastName, a.FirstName, s.SeriesName, v.VolumeNumber, t.TitleStr;
-
+    -- This procedure deletes everything associated with the specified author
+    -- including books, series and volumes in series. It affects almost every table
+    -- in this database.
 END$$
 
 DELIMITER ;
@@ -1392,27 +1059,27 @@ END$$
 DELIMITER ;
 
 -- -----------------------------------------------------
--- procedure insertOrUpdateBookDescription
+-- procedure insertOrUpdateSynopsis
 -- -----------------------------------------------------
 
 USE `booklibinventory`;
-DROP procedure IF EXISTS `booklibinventory`.`insertOrUpdateBookDescription`;
+DROP procedure IF EXISTS `booklibinventory`.`insertOrUpdateSynopsis`;
 
 DELIMITER $$
 USE `booklibinventory`$$
-CREATE PROCEDURE `insertOrUpdateBookDescription`
+CREATE PROCEDURE `insertOrUpdateSynopsis`
 (
     IN bookKey INT,
     IN bookDescription VARCHAR(1024)
 )
 BEGIN
 
-    SELECT bookdescription.BookFKbd INTO @testKey FROM bookdescription WHERE bookdescription.BookFKbd = bookKey;
+    SELECT bksynopsis.BookFKbd INTO @testKey FROM bksynopsis WHERE bksynopsis.BookFKbd = bookKey;
     
     IF @testKey IS NULL THEN
-        INSERT INTO bookdescription (
-                bookdescription.BookFKbd,
-                bookdescription.BookDescription
+        INSERT INTO bksynopsis (
+                bksynopsis.BookFKbd,
+                bksynopsis.StoryLine
             )
             VALUES(
                 bookKey,
@@ -1420,10 +1087,10 @@ BEGIN
             )
         ;
     ELSE
-        UPDATE bookdescription
+        UPDATE bksynopsis
             SET
-                bookdescription.BookDescription = bookDescription
-            WHERE bookdescription.BookFKbd = bookKey;
+                bksynopsis.StoryLine = bookDescription
+            WHERE bksynopsis.BookFKbd = bookKey;
     END IF;
 
 END$$
@@ -1536,34 +1203,18 @@ CREATE PROCEDURE `addCategory`
 )
 BEGIN
 
-    SET @categoryKey = findCategoryKeyFromStr(categoryName);
+    SET @categoryKey = NULL;
+
+    SELECT bookcategories.idBookCategories INTO @categoryKey
+        FROM bookcategories
+        WHERE bookcategories.CategoryName = categoryName;
+
     -- Prevent adding the same category again to avoid breaking the unique key structure.
-    IF @categoryKey < 1 THEN
+
+    IF @categoryKey IS NULL THEN
         INSERT INTO bookcategories (bookcategories.CategoryName) VALUES(categoryName);
     END IF;
     
-END$$
-
-DELIMITER ;
-
--- -----------------------------------------------------
--- procedure getAllBookCategoriesWithKeys
--- -----------------------------------------------------
-
-USE `booklibinventory`;
-DROP procedure IF EXISTS `booklibinventory`.`getAllBookCategoriesWithKeys`;
-
-DELIMITER $$
-USE `booklibinventory`$$
-CREATE PROCEDURE `getAllBookCategoriesWithKeys` ()
-BEGIN
-
-/*
- * Example usage would be to get all the categories to CREATE a control that embeds the primary key rather than the text.
- */
-
-    SELECT bookcategories.CategoryName, bookcategories.idBookCategories FROM bookcategories;
-
 END$$
 
 DELIMITER ;
@@ -1587,28 +1238,6 @@ BEGIN
         INSERT INTO bookformat (bookformat.FormatName) VALUES(bookFormatStr);
     END IF;
     
-END$$
-
-DELIMITER ;
-
--- -----------------------------------------------------
--- procedure getAllBookFormatsWithKeys
--- -----------------------------------------------------
-
-USE `booklibinventory`;
-DROP procedure IF EXISTS `booklibinventory`.`getAllBookFormatsWithKeys`;
-
-DELIMITER $$
-USE `booklibinventory`$$
-CREATE PROCEDURE `getAllBookFormatsWithKeys`()
-BEGIN
-
-/*
- * Example usage would be to get all the formats to CREATE a control embeds the primary key rather than the text.
- */
-
-    SELECT bookformat.FormatName, bookformat.idFormat FROM bookformat;
-
 END$$
 
 DELIMITER ;
@@ -1645,25 +1274,563 @@ END$$
 
 DELIMITER ;
 
+/*
+ * Data retrieval functions.
+ */
+
 -- -----------------------------------------------------
--- procedure deleteAuthor
+-- procedure getAllBooksForSale
 -- -----------------------------------------------------
 
 USE `booklibinventory`;
-DROP procedure IF EXISTS `booklibinventory`.`deleteAuthor`;
+DROP procedure IF EXISTS `booklibinventory`.`getAllBooksForSale`;
 
 DELIMITER $$
 USE `booklibinventory`$$
-CREATE PROCEDURE `deleteAuthor`
-(
-    IN authorFirst VARCHAR(20),
-    IN authorMiddle VARCHAR(20),
-    IN authorLast VARCHAR(20)
+CREATE PROCEDURE `getAllBooksForSale`()
+BEGIN
+
+    /*
+     * When displaying items for sale, purhcase information doesn't matter
+     * and if one read the book doesn't matter. 
+     */
+
+    SELECT
+            a.LastName,
+            a.FirstName,
+            t.TitleStr,
+            bf.FormatName,
+            BCat.CategoryName,
+            i.ISBNumber,
+            pub.Copyright,
+            pub.Edition,
+            pub.Publisher,
+            pub.OutOfPrint,
+            pub.Printing,
+            s.SeriesName,
+            v.VolumeNumber,
+            sba.IsSignedByAuthor,
+            fs.AskingPrice,
+            fs.EstimatedValue, -- Might want to remove this in the future, can be hidden by the application.
+            BDesk.StoryLine
+        FROM bookinfo AS BKI 
+        INNER JOIN authorsTab AS a ON a.idAuthors = BKI.AuthorFKbi
+        INNER JOIN title AS t ON t.idTitle = BKI.TitleFKbi
+        INNER JOIN bookformat AS bf ON bf.idFormat = BKI.BookFormatFKBi
+        INNER JOIN bookcategories AS BCat ON BCat.idBookCategories = BKI.CategoryFKbI
+        LEFT JOIN isbn AS i ON i.BookFKiSBN = BKI.idBookInfo
+        LEFT JOIN signedbyauthor AS sba ON sba.BookFKsba = BKI.idBookInfo
+        LEFT JOIN publishinginfo AS pub ON pub.BookFKPubI = BKI.idBookInfo
+        LEFT JOIN series AS s ON s.idSeries = BKI.SeriesFKbi
+        LEFT JOIN volumeinseries AS v ON v.BookFKvs = BKI.idBookInfo
+        LEFT JOIN owned AS o ON o.BookFKo = BKI.idBookInfo
+        LEFT JOIN forsale AS fs ON fs.BookFKfs = BKI.idBookInfo
+        LEFT JOIN bksynopsis AS BDesk ON BDesk.BookFKbd = BKI.idBookInfo 
+        WHERE o.IsOwned = 1 AND fs.IsForSale = 1
+        ORDER BY a.LastName, a.FirstName, s.SeriesName, v.VolumeNumber, t.TitleStr;
+    
+END$$
+
+DELIMITER ;
+
+-- -----------------------------------------------------
+-- procedure getAllBooksSignedByAuthor
+-- -----------------------------------------------------
+
+USE `booklibinventory`;
+DROP procedure IF EXISTS `booklibinventory`.`getAllBooksSignedByAuthor`;
+
+DELIMITER $$
+USE `booklibinventory`$$
+CREATE PROCEDURE `getAllBooksSignedByAuthor`()
+BEGIN
+
+    SELECT
+            a.LastName,
+            a.FirstName,
+            t.TitleStr,
+            bf.FormatName,
+            BCat.CategoryName,
+            i.ISBNumber,
+            pub.Copyright,
+            pub.Edition,
+            pub.Publisher,
+            pub.OutOfPrint,
+            pub.Printing,
+            s.SeriesName,
+            v.VolumeNumber,
+            pur.PurchaseDate,
+            pur.ListPrice,
+            pur.PaidPrice,
+            pur.Vendor,
+            sba.IsSignedByAuthor,
+            o.IsOwned,
+            o.IsWishListed,
+            hr.HaveReadBook,
+            fs.IsForSale,
+            fs.AskingPrice,
+            fs.EstimatedValue,
+            BDesk.StoryLine
+        FROM bookinfo AS BKI 
+        INNER JOIN authorsTab AS a ON a.idAuthors = BKI.AuthorFKbi
+        INNER JOIN title AS t ON t.idTitle = BKI.TitleFKbi
+        INNER JOIN bookformat AS bf ON bf.idFormat = BKI.BookFormatFKBi
+        INNER JOIN bookcategories AS BCat ON BCat.idBookCategories = BKI.CategoryFKbI
+        LEFT JOIN isbn AS i ON i.BookFKiSBN = BKI.idBookInfo
+        LEFT JOIN signedbyauthor AS sba ON sba.BookFKsba = BKI.idBookInfo
+        LEFT JOIN publishinginfo AS pub ON pub.BookFKPubI = BKI.idBookInfo
+        LEFT JOIN purchaseinfo AS pur ON pur.BookFKPurI = BKI.idBookInfo
+        LEFT JOIN series AS s ON s.idSeries = BKI.SeriesFKbi
+        LEFT JOIN volumeinseries AS v ON v.BookFKvs = BKI.idBookInfo
+        LEFT JOIN owned AS o ON o.BookFKo = BKI.idBookInfo
+        LEFT JOIN forsale AS fs ON fs.BookFKfs = BKI.idBookInfo
+        LEFT JOIN haveread AS hr ON hr.BookFKhr = BKI.idBookInfo
+        LEFT JOIN bksynopsis AS BDesk ON BDesk.BookFKbd = BKI.idBookInfo 
+        WHERE sba.IsSignedByAuthor = 1
+        ORDER BY BCat.CategoryName, a.LastName, a.FirstName, s.SeriesName, v.VolumeNumber, t.TitleStr;
+    
+END$$
+
+DELIMITER ;
+
+-- -----------------------------------------------------
+-- procedure getAllBooks
+-- -----------------------------------------------------
+
+USE `booklibinventory`;
+DROP procedure IF EXISTS `booklibinventory`.`getAllBooks`;
+
+DELIMITER $$
+USE `booklibinventory`$$
+CREATE PROCEDURE `getAllBooks`()
+BEGIN
+
+    SELECT
+            a.LastName,
+            a.FirstName,
+            t.TitleStr,
+            bf.FormatName,
+            BCat.CategoryName,
+            i.ISBNumber,
+            pub.Copyright,
+            pub.Edition,
+            pub.Publisher,
+            pub.OutOfPrint,
+            pub.Printing,
+            s.SeriesName,
+            v.VolumeNumber,
+            pur.PurchaseDate,
+            pur.ListPrice,
+            pur.PaidPrice,
+            pur.Vendor,
+            sba.IsSignedByAuthor,
+            o.IsOwned,
+            o.IsWishListed,
+            hr.HaveReadBook,
+            fs.IsForSale,
+            fs.AskingPrice,
+            fs.EstimatedValue,
+            BDesk.StoryLine
+        FROM bookinfo AS BKI 
+        INNER JOIN authorsTab AS a ON a.idAuthors = BKI.AuthorFKbi
+        INNER JOIN title AS t ON t.idTitle = BKI.TitleFKbi
+        INNER JOIN bookformat AS bf ON bf.idFormat = BKI.BookFormatFKBi
+        INNER JOIN bookcategories AS BCat ON BCat.idBookCategories = BKI.CategoryFKbI
+        LEFT JOIN isbn AS i ON i.BookFKiSBN = BKI.idBookInfo
+        LEFT JOIN signedbyauthor AS sba ON sba.BookFKsba = BKI.idBookInfo
+        LEFT JOIN publishinginfo AS pub ON pub.BookFKPubI = BKI.idBookInfo
+        LEFT JOIN purchaseinfo AS pur ON pur.BookFKPurI = BKI.idBookInfo
+        LEFT JOIN series AS s ON s.idSeries = BKI.SeriesFKbi
+        LEFT JOIN volumeinseries AS v ON v.BookFKvs = BKI.idBookInfo
+        LEFT JOIN owned AS o ON o.BookFKo = BKI.idBookInfo
+        LEFT JOIN forsale AS fs ON fs.BookFKfs = BKI.idBookInfo
+        LEFT JOIN haveread AS hr ON hr.BookFKhr = BKI.idBookInfo
+        LEFT JOIN bksynopsis AS BDesk ON BDesk.BookFKbd = BKI.idBookInfo 
+        ORDER BY BCat.CategoryName, a.LastName, a.FirstName, s.SeriesName, v.VolumeNumber, t.TitleStr;
+    
+END$$
+
+DELIMITER ;
+
+-- -----------------------------------------------------
+-- procedure getAllBooksInLib
+-- -----------------------------------------------------
+
+USE `booklibinventory`;
+DROP procedure IF EXISTS `booklibinventory`.`getAllBooksInLib`;
+
+DELIMITER $$
+USE `booklibinventory`$$
+CREATE PROCEDURE `getAllBooksInLib`()
+BEGIN
+
+    SELECT
+            a.LastName,
+            a.FirstName,
+            t.TitleStr,
+            bf.FormatName,
+            BCat.CategoryName,
+            i.ISBNumber,
+            pub.Copyright,
+            pub.Edition,
+            pub.Publisher,
+            pub.OutOfPrint,
+            pub.Printing,
+            s.SeriesName,
+            v.VolumeNumber,
+            pur.PurchaseDate,
+            pur.ListPrice,
+            pur.PaidPrice,
+            pur.Vendor,
+            sba.IsSignedByAuthor,
+            o.IsOwned,
+            o.IsWishListed,
+            hr.HaveReadBook,
+            fs.IsForSale,
+            fs.AskingPrice,
+            fs.EstimatedValue,
+            BDesk.StoryLine
+        FROM bookinfo AS BKI 
+        INNER JOIN authorsTab AS a ON a.idAuthors = BKI.AuthorFKbi
+        INNER JOIN title AS t ON t.idTitle = BKI.TitleFKbi
+        INNER JOIN bookformat AS bf ON bf.idFormat = BKI.BookFormatFKBi
+        INNER JOIN bookcategories AS BCat ON BCat.idBookCategories = BKI.CategoryFKbI
+        LEFT JOIN isbn AS i ON i.BookFKiSBN = BKI.idBookInfo
+        LEFT JOIN signedbyauthor AS sba ON sba.BookFKsba = BKI.idBookInfo
+        LEFT JOIN publishinginfo AS pub ON pub.BookFKPubI = BKI.idBookInfo
+        LEFT JOIN purchaseinfo AS pur ON pur.BookFKPurI = BKI.idBookInfo
+        LEFT JOIN series AS s ON s.idSeries = BKI.SeriesFKbi
+        LEFT JOIN volumeinseries AS v ON v.BookFKvs = BKI.idBookInfo
+        LEFT JOIN owned AS o ON o.BookFKo = BKI.idBookInfo
+        LEFT JOIN forsale AS fs ON fs.BookFKfs = BKI.idBookInfo
+        LEFT JOIN haveread AS hr ON hr.BookFKhr = BKI.idBookInfo
+        LEFT JOIN bksynopsis AS BDesk ON BDesk.BookFKbd = BKI.idBookInfo 
+        WHERE o.IsOwned = 1
+        ORDER BY a.LastName, a.FirstName, s.SeriesName, v.VolumeNumber, t.TitleStr;
+    
+END$$
+
+DELIMITER ;
+
+-- -----------------------------------------------------
+-- procedure getAllSeriesByThisAuthor
+-- -----------------------------------------------------
+
+USE `booklibinventory`;
+DROP procedure IF EXISTS `booklibinventory`.`getAllSeriesByThisAuthor`;
+
+DELIMITER $$
+USE `booklibinventory`$$
+CREATE PROCEDURE `getAllSeriesByThisAuthor`(
+    IN AuthorLastName VARCHAR(20),
+    IN AuthorFirstName VARCHAR(20)
 )
 BEGIN
-    -- This procedure deletes everything associated with the specified author
-    -- including books, series and volumes in series. It affects almost every table
-    -- in this database.
+
+    SELECT series.SeriesName FROM series WHERE series.AuthorFK = findauthorKey(AuthorFirstName, AuthorLastName);
+
+END$$
+
+DELIMITER ;
+
+-- -----------------------------------------------------
+-- procedure getAllSeriesData
+-- -----------------------------------------------------
+
+USE `booklibinventory`;
+DROP procedure IF EXISTS `booklibinventory`.`getAllSeriesData`;
+
+DELIMITER $$
+USE `booklibinventory`$$
+CREATE PROCEDURE `getAllSeriesData`()
+BEGIN
+
+    SELECT a.LastName, a.FirstName, s.SeriesName
+        FROM series AS s
+        INNER JOIN authorstab AS a
+        ON a.idAuthors = s.AuthorFK
+        ORDER BY a.LastName, a.FirstName, s.SeriesName;
+
+END$$
+
+DELIMITER ;
+
+-- -----------------------------------------------------
+-- procedure getBookData
+-- -----------------------------------------------------
+
+USE `booklibinventory`;
+DROP procedure IF EXISTS `booklibinventory`.`getBookData`;
+
+DELIMITER $$
+USE `booklibinventory`$$
+CREATE PROCEDURE `getBookData`(
+    IN authorLast VARCHAR(20),
+    IN authorFirst VARCHAR(20),
+    IN titleStr VARCHAR(128),
+    IN formatStr VARCHAR(45)
+)
+BEGIN
+
+    -- No order by clause because it's returning only a single book.
+    SELECT
+            a.LastName,
+            a.FirstName,
+            t.TitleStr,
+            bf.FormatName,
+            BCat.CategoryName,
+            i.ISBNumber,
+            pub.Copyright,
+            pub.Edition,
+            pub.Publisher,
+            pub.OutOfPrint,
+            pub.Printing,
+            s.SeriesName,
+            v.VolumeNumber,
+            pur.PurchaseDate,
+            pur.ListPrice,
+            pur.PaidPrice,
+            pur.Vendor,
+            sba.IsSignedByAuthor,
+            o.IsOwned,
+            o.IsWishListed,
+            hr.HaveReadBook,
+            fs.IsForSale,
+            fs.AskingPrice,
+            fs.EstimatedValue,
+            BDesk.StoryLine
+        FROM bookinfo AS BKI 
+        INNER JOIN authorsTab AS a ON a.idAuthors = BKI.AuthorFKbi
+        INNER JOIN title AS t ON t.idTitle = BKI.TitleFKbi
+        INNER JOIN bookformat AS bf ON bf.idFormat = BKI.BookFormatFKBi
+        INNER JOIN bookcategories AS BCat ON BCat.idBookCategories = BKI.CategoryFKbI
+        LEFT JOIN isbn AS i ON i.BookFKiSBN = BKI.idBookInfo
+        LEFT JOIN signedbyauthor AS sba ON sba.BookFKsba = BKI.idBookInfo
+        LEFT JOIN publishinginfo AS pub ON pub.BookFKPubI = BKI.idBookInfo
+        LEFT JOIN purchaseinfo AS pur ON pur.BookFKPurI = BKI.idBookInfo
+        LEFT JOIN series AS s ON s.idSeries = BKI.SeriesFKbi
+        LEFT JOIN volumeinseries AS v ON v.BookFKvs = BKI.idBookInfo
+        LEFT JOIN owned AS o ON o.BookFKo = BKI.idBookInfo
+        LEFT JOIN forsale AS fs ON fs.BookFKfs = BKI.idBookInfo
+        LEFT JOIN haveread AS hr ON hr.BookFKhr = BKI.idBookInfo
+        LEFT JOIN bksynopsis AS BDesk ON BDesk.BookFKbd = BKI.idBookInfo 
+        WHERE a.LastName = authorLast AND a.FirstName = authorFirst AND t.TitleStr = titleStr and bf.FormatName = formatStr;
+
+END$$
+
+DELIMITER ;
+
+-- -----------------------------------------------------
+-- procedure getAllWishListBooks
+-- -----------------------------------------------------
+
+USE `booklibinventory`;
+DROP procedure IF EXISTS `booklibinventory`.`getAllWishListBooks`;
+
+DELIMITER $$
+USE `booklibinventory`$$
+CREATE PROCEDURE `getAllWishListBooks`()
+BEGIN
+
+    SELECT
+            a.LastName,
+            a.FirstName,
+            t.TitleStr,
+            BCat.CategoryName,
+            pub.Copyright,
+            pub.Edition,
+            pub.Publisher,
+            pub.OutOfPrint,
+            pub.Printing,
+            s.SeriesName,
+            v.VolumeNumber,
+            o.IsOwned,
+            o.IsWishListed,
+            hr.HaveReadBook
+        FROM bookinfo AS BKI 
+        INNER JOIN authorsTab AS a ON a.idAuthors = BKI.AuthorFKbi
+        INNER JOIN title AS t ON t.idTitle = BKI.TitleFKbi
+        INNER JOIN bookcategories AS BCat ON BCat.idBookCategories = BKI.CategoryFKbI
+        LEFT JOIN publishinginfo AS pub ON pub.BookFKPubI = BKI.idBookInfo
+        LEFT JOIN series AS s ON s.idSeries = BKI.SeriesFKbi
+        LEFT JOIN volumeinseries AS v ON v.BookFKvs = BKI.idBookInfo
+        LEFT JOIN owned AS o ON o.BookFKo = BKI.idBookInfo
+        LEFT JOIN haveread AS hr ON hr.BookFKhr = BKI.idBookInfo
+        WHERE o.IsWishListed = 1
+        ORDER BY a.LastName, a.FirstName, s.SeriesName, v.VolumeNumber, t.TitleStr;
+    
+END$$
+
+DELIMITER ;
+
+-- -----------------------------------------------------
+-- procedure getAllBooksByThisAuthor
+-- -----------------------------------------------------
+
+USE `booklibinventory`;
+DROP procedure IF EXISTS `booklibinventory`.`getAllBooksByThisAuthor`;
+
+DELIMITER $$
+USE `booklibinventory`$$
+CREATE PROCEDURE `getAllBooksByThisAuthor` 
+(
+    IN authorLastName VARCHAR(20),
+    IN authorFirstName VARCHAR(20)
+)
+BEGIN
+
+    SET @authorKey = findauthorKey(authorFirstName, authorLastName);
+
+    SELECT
+            a.LastName,
+            a.FirstName,
+            t.TitleStr,
+            bf.FormatName,
+            BCat.CategoryName,
+            i.ISBNumber,
+            pub.Copyright,
+            pub.Edition,
+            pub.Publisher,
+            pub.OutOfPrint,
+            pub.Printing,
+            s.SeriesName,
+            v.VolumeNumber,
+            pur.PurchaseDate,
+            pur.ListPrice,
+            pur.PaidPrice,
+            pur.Vendor,
+            sba.IsSignedByAuthor,
+            o.IsOwned,
+            o.IsWishListed,
+            hr.HaveReadBook,
+            fs.IsForSale,
+            fs.AskingPrice,
+            fs.EstimatedValue,
+            BDesk.StoryLine
+        FROM bookinfo AS BKI 
+        INNER JOIN authorsTab AS a ON a.idAuthors = BKI.AuthorFKbi
+        INNER JOIN title AS t ON t.idTitle = BKI.TitleFKbi
+        INNER JOIN bookformat AS bf ON bf.idFormat = BKI.BookFormatFKBi
+        INNER JOIN bookcategories AS BCat ON BCat.idBookCategories = BKI.CategoryFKbI
+        LEFT JOIN isbn AS i ON i.BookFKiSBN = BKI.idBookInfo
+        LEFT JOIN signedbyauthor AS sba ON sba.BookFKsba = BKI.idBookInfo
+        LEFT JOIN publishinginfo AS pub ON pub.BookFKPubI = BKI.idBookInfo
+        LEFT JOIN purchaseinfo AS pur ON pur.BookFKPurI = BKI.idBookInfo
+        LEFT JOIN series AS s ON s.idSeries = BKI.SeriesFKbi
+        LEFT JOIN volumeinseries AS v ON v.BookFKvs = BKI.idBookInfo
+        LEFT JOIN owned AS o ON o.BookFKo = BKI.idBookInfo
+        LEFT JOIN forsale AS fs ON fs.BookFKfs = BKI.idBookInfo
+        LEFT JOIN haveread AS hr ON hr.BookFKhr = BKI.idBookInfo
+        LEFT JOIN bksynopsis AS BDesk ON BDesk.BookFKbd = BKI.idBookInfo 
+        WHERE BKI.AuthorFKbi = @authorKey
+        ORDER BY a.LastName, a.FirstName, s.SeriesName, v.VolumeNumber, t.TitleStr;
+
+END$$
+
+DELIMITER ;
+
+-- -----------------------------------------------------
+-- procedure getAllBooksThatWereRead
+-- -----------------------------------------------------
+
+USE `booklibinventory`;
+DROP procedure IF EXISTS `booklibinventory`.`getAllBooksThatWereRead`;
+
+DELIMITER $$
+USE `booklibinventory`$$
+CREATE PROCEDURE `getAllBooksThatWereRead` 
+(
+)
+BEGIN
+
+    SELECT
+            a.LastName,
+            a.FirstName,
+            t.TitleStr,
+            bf.FormatName,
+            BCat.CategoryName,
+            i.ISBNumber,
+            pub.Copyright,
+            pub.Edition,
+            pub.Publisher,
+            pub.OutOfPrint,
+            pub.Printing,
+            s.SeriesName,
+            v.VolumeNumber,
+            pur.PurchaseDate,
+            pur.ListPrice,
+            pur.PaidPrice,
+            pur.Vendor,
+            sba.IsSignedByAuthor,
+            o.IsOwned,
+            o.IsWishListed,
+            hr.HaveReadBook,
+            fs.IsForSale,
+            fs.AskingPrice,
+            fs.EstimatedValue,
+            BDesk.StoryLine
+        FROM bookinfo AS BKI 
+        INNER JOIN authorsTab AS a ON a.idAuthors = BKI.AuthorFKbi
+        INNER JOIN title AS t ON t.idTitle = BKI.TitleFKbi
+        INNER JOIN bookformat AS bf ON bf.idFormat = BKI.BookFormatFKBi
+        INNER JOIN bookcategories AS BCat ON BCat.idBookCategories = BKI.CategoryFKbI
+        LEFT JOIN isbn AS i ON i.BookFKiSBN = BKI.idBookInfo
+        LEFT JOIN signedbyauthor AS sba ON sba.BookFKsba = BKI.idBookInfo
+        LEFT JOIN publishinginfo AS pub ON pub.BookFKPubI = BKI.idBookInfo
+        LEFT JOIN purchaseinfo AS pur ON pur.BookFKPurI = BKI.idBookInfo
+        LEFT JOIN series AS s ON s.idSeries = BKI.SeriesFKbi
+        LEFT JOIN volumeinseries AS v ON v.BookFKvs = BKI.idBookInfo
+        LEFT JOIN owned AS o ON o.BookFKo = BKI.idBookInfo
+        LEFT JOIN forsale AS fs ON fs.BookFKfs = BKI.idBookInfo
+        LEFT JOIN haveread AS hr ON hr.BookFKhr = BKI.idBookInfo
+        LEFT JOIN bksynopsis AS BDesk ON BDesk.BookFKbd = BKI.idBookInfo 
+        WHERE hr.HaveReadBook = 1
+        ORDER BY a.LastName, a.FirstName, s.SeriesName, v.VolumeNumber, t.TitleStr;
+
+END$$
+
+DELIMITER ;
+
+-- -----------------------------------------------------
+-- procedure getAllBookCategoriesWithKeys
+-- -----------------------------------------------------
+
+USE `booklibinventory`;
+DROP procedure IF EXISTS `booklibinventory`.`getAllBookCategoriesWithKeys`;
+
+DELIMITER $$
+USE `booklibinventory`$$
+CREATE PROCEDURE `getAllBookCategoriesWithKeys` ()
+BEGIN
+
+/*
+ * Example usage would be to get all the categories to CREATE a control that embeds the primary key rather than the text.
+ */
+
+    SELECT bookcategories.CategoryName, bookcategories.idBookCategories FROM bookcategories;
+
+END$$
+
+DELIMITER ;
+
+-- -----------------------------------------------------
+-- procedure getAllBookFormatsWithKeys
+-- -----------------------------------------------------
+
+USE `booklibinventory`;
+DROP procedure IF EXISTS `booklibinventory`.`getAllBookFormatsWithKeys`;
+
+DELIMITER $$
+USE `booklibinventory`$$
+CREATE PROCEDURE `getAllBookFormatsWithKeys`()
+BEGIN
+
+/*
+ * Example usage would be to get all the formats to CREATE a control embeds the primary key rather than the text.
+ */
+
+    SELECT bookformat.FormatName, bookformat.idFormat FROM bookformat;
+
 END$$
 
 DELIMITER ;
@@ -1705,7 +1872,11 @@ CREATE PROCEDURE `getAuthorDataByLastName`
     IN authorLastName VARCHAR(20)
 )
 BEGIN
-
+    
+    /*
+     * Will return multiple authors with the same last name, e.g. if the last name is Herbert
+     * it will return both Frank Herbert and Brian Herbert.
+     */
     SELECT * FROM authorstab WHERE authorstab.LastName = authorLastName;
     
 END$$
@@ -1734,6 +1905,10 @@ END$$
 
 DELIMITER ;
 
+/*
+ * Start of functions that allow the user to update books in a limited manner.
+ */
+
 -- -----------------------------------------------------
 -- procedure bookSold
 -- -----------------------------------------------------
@@ -1752,9 +1927,11 @@ CREATE PROCEDURE `bookSold`
 )
 BEGIN
 
-    SET @bookKey = findBookKey(authorLastName, authorFirstName, bookTitle, bookFormat);
+    SET @isOwned = 0, @isWishListed = 0;
+
+    SET @bookKey = findBookKeyFast(authorLastName, authorFirstName, bookTitle, bookFormat);
     
-    CALL insertOrUpdateOwned(@bookKey, 0, 0);
+    CALL insertOrUpdateOwned(@bookKey, @isOwned, @isWishListed);
 
     DELETE FROM forsale WHERE forsale.BookFKfs = @bookKey;
 
@@ -1779,9 +1956,11 @@ CREATE PROCEDURE `finishedReadingBook` (
 )
 BEGIN
 
-    SET @bookKey = findBookKey(authorLastName, authorFirstName, bookTitle, bookFormat);
+    SET @haveReadBook = 1;
 
-    CALL insertOrUpdateHaveRead(@bookKey, 1);
+    SET @bookKey = findBookKeyFast(authorLastName, authorFirstName, bookTitle, bookFormat);
+
+    CALL insertOrUpdateHaveRead(@bookKey, @haveReadBook);
     
 END$$
 
@@ -1807,15 +1986,19 @@ CREATE PROCEDURE `putBookUpForSale`
 )
 BEGIN
 
-    SET @bookKey = findBookKey(authorLastName, authorLastName, bookTitle, bookFormat);
+    SET @isForSale = 1;
 
-SELECT @bookKey, authorLastName;
-    
-    CALL insertOrUpdateForSale(@bookKey, 1, askingPrice, estimatedValue);
+    SET @bookKey = findBookKeyFast(authorLastName, authorFirstName, bookTitle, bookFormat);
+
+    CALL insertOrUpdateForSale(@bookKey, @isForSale, askingPrice, estimatedValue);
 
 END$$
 
 DELIMITER ;
+
+/*
+ * Once only code called during installation or testing.
+ */
 
 -- -----------------------------------------------------
 -- procedure initBookInventoryTool
@@ -1829,6 +2012,9 @@ USE `booklibinventory`$$
 CREATE PROCEDURE `initBookInventoryTool` ()
 BEGIN
 
+SET @procName = 'initBookInventoryTool';
+SELECT @procName;
+
 -- Initialize some basic formats, user can add more later.
     CALL addFormat('Hardcover');
     CALL addFormat('Trade Paperback');
@@ -1840,12 +2026,12 @@ BEGIN
     CALL addFormat('eBook HTML');
 
 -- Initialize some basic categories, user can add more later.
-    CALL addCategory('None Fiction');
-    CALL addCategory('None Fiction: Biography');
-    CALL addCategory('None Fiction: Biology');
-    CALL addCategory('None Fiction: Computer');
-    CALL addCategory('None Fiction: Electrical Engineering');
-    CALL addCategory('None Fiction: History');
+    CALL addCategory('Non-Fiction');
+    CALL addCategory('Non-Fiction: Biography');
+    CALL addCategory('Non-Fiction: Biology');
+    CALL addCategory('Non-Fiction: Computer');
+    CALL addCategory('Non-Fiction: Electrical Engineering');
+    CALL addCategory('Non-Fiction: History');
     CALL addCategory('Textbook');
     CALL addCategory('Poetry');
     CALL addCategory('Art');
@@ -1863,6 +2049,10 @@ END$$
 
 DELIMITER ;
 
+/*
+ * Unit testing procedures.
+ */
+
 -- -----------------------------------------------------
 -- procedure zzzUnitTestAddAuthors
 -- -----------------------------------------------------
@@ -1874,6 +2064,8 @@ DELIMITER $$
 USE `booklibinventory`$$
 CREATE PROCEDURE `zzzUnitTestAddAuthors` ()
 BEGIN
+SET @procName = 'zzzUnitTestAddAuthors';
+SELECT @procName;
 
     CALL addAuthor('Heinlein', 'Robert', 'Anson', '1907', '1988');
     CALL addAuthor('Asimov', 'Isaac', NULL, '1920', '1992');
@@ -1888,8 +2080,9 @@ BEGIN
     CALL addAuthor('Drake', 'David', NULL, '1945', NULL);
     CALL addAuthor('Weber', 'David', 'Mark', '1952', NULL);
     CALL addAuthor('Baxter', 'Stephen', NULL, '1957', NULL);
+    CALL addAuthor('Knuth', 'Donald', 'Ervin', '1938', NULL);
     
-    IF (SELECT COUNT(*) FROM authorstab) != 13 THEN
+    IF (SELECT COUNT(*) FROM authorstab) != 14 THEN
         SELECT COUNT(*) FROM series;
         SELECT * FROM series;
     END IF;
@@ -1909,6 +2102,8 @@ DELIMITER $$
 USE `booklibinventory`$$
 CREATE PROCEDURE `zzzUnitTestAddAuthorSeries` ()
 BEGIN
+SET @procName = 'zzzUnitTestAddAuthorSeries';
+SELECT @procName;
 
     CALL addAuthorSeries('David', 'Weber', 'Safehold');
     CALL addAuthorSeries('David', 'Weber', 'Honor Harrington');
@@ -1916,10 +2111,11 @@ BEGIN
     CALL addAuthorSeries('Marion', 'Zimmer Bradley', 'Darkover');
     CALL addAuthorSeries('Isaac', 'Asimov', 'Foundation');
     CALL addAuthorSeries('Stephen', 'Baxter', 'Northland');
+    CALL addAuthorSeries('Donald', 'Knuth', 'The Art of Computing Programming');
 -- The follow statement should fail to insert the series since John Ringo has not been added to authorstab.
     CALL addAuthorSeries('John', 'Ringo', 'Kildar');
 
-    IF (SELECT COUNT(*) FROM series) != 6 THEN
+    IF (SELECT COUNT(*) FROM series) != 7 THEN
         SELECT COUNT(*) FROM series;
         SELECT * FROM series;
     END IF;
@@ -1948,7 +2144,7 @@ BEGIN
  *      insertOrUpdateVolumeInSeries
  *      insertOrUpdateForSale()
  *      insertOrUpdateIsSignedByAuthor
- *      insertOrUpdateBookDescription
+ *      insertOrUpdateSynopsis
  *      insertOrUpdateISBN
  *      insertOrUpdatePurchaseInfo
  *
@@ -1963,6 +2159,9 @@ BEGIN
  */
 
     DECLARE bookKey INT;
+
+SET @procName = 'zzzUnitTestAddBookToLibrary';
+SELECT @procName;
 
     CALL addBookToLibrary('Fiction: Science Fiction', 'Weber', 'David', 'On Basilisk Station',  'Mass Market Paperback', '1993', 1, 9, 'Baen Books', 0, 'Honor Harrington', 1,
         '0-7434-3571-0', 0, 1, 0, 0, 8.99, 8.99, 1, 'bookDescription', bookKey);
@@ -2017,9 +2216,9 @@ BEGIN
         SELECT * FROM publishinginfo;
     END IF;
 
-    IF (SELECT COUNT(*) FROM bookdescription) != 1 THEN
-        SELECT COUNT(*) FROM bookdescription;
-        SELECT * FROM bookdescription;
+    IF (SELECT COUNT(*) FROM bksynopsis) != 1 THEN
+        SELECT COUNT(*) FROM bksynopsis;
+        SELECT * FROM bksynopsis;
     END IF;
 
     IF (SELECT COUNT(*) FROM forsale) != 4 THEN
@@ -2062,6 +2261,54 @@ END$$
 DELIMITER ;
 
 -- -----------------------------------------------------
+-- procedure zzzUnitTestUserUpdates
+-- -----------------------------------------------------
+
+USE `booklibinventory`;
+DROP procedure IF EXISTS `booklibinventory`.`zzzUnitTestUserUpdates`;
+
+DELIMITER $$
+USE `booklibinventory`$$
+CREATE PROCEDURE `zzzUnitTestUserUpdates` ()
+BEGIN
+SET @procName = 'zzzUnitTestUserUpdates';
+SELECT @procName;
+
+/*
+ * This procedure tests the buyBook procedure. Since the buyBook procedure call addBookToLibrary, everything tested
+ * by zzzUnitTestAddBookToLibrary is also tested by this procedure.
+ *
+ */
+
+    SELECT COUNT(*) INTO @forSaleCount FROM forsale WHERE forsale.IsForSale = 1;
+    CALL putBookUpForSale('David', 'Weber', 'Honor of the Queen', 'Mass Market Paperback', 10.99, 7.99);
+    IF (SELECT COUNT(*) FROM forsale WHERE forsale.IsForSale = 1) != (@forSaleCount + 1) THEN
+        SELECT COUNT(*) FROM forsale;
+        SELECT * FROM forsale;
+    END IF;
+    SELECT COUNT(*) INTO @forSaleCount FROM forsale;
+    CALL getAllBooksForSale();
+    
+    SELECT COUNT(*) INTO @haveReadCount FROM haveread WHERE haveread.HaveReadBook = 1;
+    CALL finishedReadingBook('Stephen', 'Baxter', 'Stone Spring', 'Mass Market Paperback');
+    CALL finishedReadingBook('Stephen', 'Baxter', 'Bronze Summer', 'Mass Market Paperback');
+    IF (SELECT COUNT(*) FROM haveread WHERE haveread.HaveReadBook = 1) != (@haveReadCount + 2) THEN
+        SELECT COUNT(*) FROM haveread;
+        SELECT * FROM haveread;
+    END IF;
+    CALL getAllBooksThatWereRead();
+
+    CALL bookSold('David', 'Weber', 'Honor of the Queen', 'Mass Market Paperback');
+    IF (SELECT COUNT(*) FROM forsale) != (@forSaleCount - 1) THEN
+        SELECT COUNT(*) FROM forsale;
+        SELECT * FROM forsale;
+    END IF;
+
+END$$
+
+DELIMITER ;
+
+-- -----------------------------------------------------
 -- procedure zzzUnitTestBuyBook
 -- -----------------------------------------------------
 
@@ -2080,6 +2327,10 @@ BEGIN
 
     DECLARE bookKey INT;
     DECLARE buyDate DATE;
+
+SET @procName = 'zzzUnitTestBuyBook';
+SELECT @procName;
+
     Set buyDate = CURDATE();
 
     CALL buyBook('Fiction: Science Fiction', 'Baxter', 'Stephen', 'Stone Spring',  'Mass Market Paperback', '2010', 1, 1, 'Roc', 0, 'Northland', 1,
@@ -2113,9 +2364,9 @@ BEGIN
         SELECT * FROM publishinginfo;
     END IF;
 
-    IF (SELECT COUNT(*) FROM bookdescription) != 3 THEN
-        SELECT COUNT(*) FROM bookdescription;
-        SELECT * FROM bookdescription;
+    IF (SELECT COUNT(*) FROM bksynopsis) != 3 THEN
+        SELECT COUNT(*) FROM bksynopsis;
+        SELECT * FROM bksynopsis;
     END IF;
 
     IF (SELECT COUNT(*) FROM forsale) != 7 THEN
@@ -2169,6 +2420,9 @@ USE `booklibinventory`$$
 CREATE PROCEDURE `zzzUnitTestInitProcedure` ()
 BEGIN
 
+SET @procName = 'zzzUnitTestInitProcedure';
+SELECT @procName;
+
     CALL initBookInventoryTool();
     SELECT COUNT(*) INTO @formatCount FROM booklibinventory.bookformat;
     IF @formatCount != 8 THEN
@@ -2189,7 +2443,7 @@ BEGIN
         SELECT * FROM bookcategories;
     END IF;
     -- Should not be added a second time.
-    CALL addCategory('None Fiction: Electrical Engineering');
+    CALL addCategory('Non-Fiction: Electrical Engineering');
     IF (SELECT COUNT(*) FROM bookcategories) != @categoryCount THEN
         SELECT @categoryCount, COUNT(*) FROM bookcategories;
         SELECT * FROM bookcategories;
@@ -2211,6 +2465,9 @@ USE `booklibinventory`$$
 CREATE PROCEDURE `zzzUnitTestFunctions` ()
 BEGIN
 
+SET @procName = 'zzzUnitTestFunctions';
+SELECT @procName;
+
     /*
      * The functions not explicitly tested here are tested indirectly 
      * through the function calls here with the exception of insertTitleIfNotExist
@@ -2218,32 +2475,38 @@ BEGIN
 
     SET @authorKey = findAuthorKey('Arthur','Clarke');
     IF @authorKey != 3 THEN
-        Select authorstab.FirstName, authorstab.LastName FROM authorstab WHERE idAuthors = @authorKey;
+        SELECT @authorKey;
+        SELECT authorstab.FirstName, authorstab.LastName FROM authorstab WHERE idAuthors = @authorKey;
     END IF;
 
-    SET @bookKey = findBookKey('Baxter', 'Stephen', 'Stone Spring', 'Mass Market Paperback');
+    SET @bookKey = findBookKeyFast('Baxter', 'Stephen', 'Stone Spring', 'Mass Market Paperback');
     IF (@bookKey != 6) THEN
-        Select * FROM bookinfo WHERE bookinfo.idBookInfo = @bookKey;
+        SELECT @bookKey;
+        SELECT * FROM bookinfo WHERE bookinfo.idBookInfo = @bookKey;
     END IF;
 
     SET @titleKey = findTitleKey('Star Guard');
     IF (@titleKey != 5) THEN
-        Select * FROM title WHERE title.idTitle = @titleKey;
+        SELECT @titleKey;
+        SELECT * FROM title WHERE title.idTitle = @titleKey;
     END IF;
 
-    SET @categoryKey = findCategoryKeyFromStr('None Fiction: Electrical Engineering');
+    SET @categoryKey = findCategoryKeyFromStr('Non-Fiction: Electrical Engineering');
     IF (@categoryKey != 5) THEN
-        Select * FROM categories WHERE categories.idCategories = @categoryKey;
+        SELECT @categoryKey;
+        SELECT * FROM bookcategories; -- WHERE bookcategories.idBookCategories = @categoryKey;
     END IF;
 
     SET @formatKey = findFormatKeyFromStr('Mass Market Paperback');
     IF (@formatKey != 3) THEN
-        Select * FROM bookformat WHERE bookformat.idFormat = @formatKey;
+        SELECT @formatKey;
+        SELECT * FROM bookformat WHERE bookformat.idFormat = @formatKey;
     END IF;
 
     SET @seriesKey = findSeriesKey('David', 'Weber', 'Honorverse');
     IF (@seriesKey != 3) THEN
-        Select * FROM series WHERE series.idSeries = @seriesKey;
+        SELECT @seriesKey;
+        SELECT * FROM series WHERE series.idSeries = @seriesKey;
     END IF;
 
 END$$
@@ -2270,6 +2533,8 @@ BEGIN
      * then a select is run to show the error. No output means no errors.
      */
 
+    DECLARE bookKey INT;
+
     CALL zzzUnitTestInitProcedure();
     CALL zzzUnitTestAddAuthors();
     CALL zzzUnitTestAddAuthorSeries();
@@ -2277,26 +2542,51 @@ BEGIN
     CALL zzzUnitTestBuyBook();
     CALL zzzUnitTestFunctions();
 
+    -- These 3 books are not included in the previous testing.
+    CALL addBookToLibrary('Non-Fiction: Computer', 'Knuth', 'Donald', 'Fundamental Algorithms',  'Hardcover', '1973', 2, NULL, 'Addison Wesley', 0, 'The Art of Computer Proramming', 1,
+        '0-201-03809-9', 0, 1, 0, 0, 0.00, 0.00, 1, NULL, bookKey);
+    IF bookKey = 0 THEN
+        SET @emsg = 'Failed to add Fundamental Algorithms';
+        SELECT emsg;
+    END IF;
+    CALL addBookToLibrary('Non-Fiction: Computer', 'Knuth', 'Donald', 'Seminumerical Algorithms',  'Hardcover', '1981', 2, NULL, 'Addison Wesley', 0, 'The Art of Computer Proramming', 2,
+        '0-201-03822-6', 0, 1, 0, 0, 0.00, 0.00, 1, NULL, bookKey);
+    IF bookKey = 0 THEN
+        SET @emsg = 'Failed to add Seminumerical Algorithms';
+        SELECT emsg;
+    END IF;
+    CALL addBookToLibrary('Non-Fiction: Computer', 'Knuth', 'Donald', 'Sorting and Searching',  'Hardcover', '1973', 2, NULL, 'Addison Wesley', 0, 'The Art of Computer Proramming', 3,
+        '0-201-03803-X', 0, 1, 0, 0, 0.00, 0.00, 1, NULL, bookKey);
+    IF bookKey = 0 THEN
+        SET @emsg = 'Failed to add Sorting and Searching';
+        SELECT emsg;
+        SELECT * from authorstab;
+        SELECT * from series;
+    END IF;
+    CALL addAuthor('Brin', 'David', 'Glen', '1950', NULL);
+    CALL addAuthorSeries('David', 'Brint', 'The Uplift Saga');
+    CALL addBookToLibrary('Fiction: Science Fiction', 'Brin', 'David', 'Uplift War',  'Hardcover', '1987', 1, 1, 'Phantasia Press', 0, 'The Uplift Saga', 3,
+        '0-932096-44-1', 1, 1, 0, 0, 100.00, 100.00, 1, NULL, bookKey);
+
     -- Test all the data retrieval procedures to see that they return data rows.
     -- These tests by default will provide output.
-    CALL getAllBookFormatsWithKeys();
-    CALL getAllBookCategoriesWithKeys();
-    CALL getAllBooksInLib(); -- Test selecting all fields
-    CALL getAllBooksByThisAuthor('Baxter', 'Stephen');
-    CALL getAllWishListBooks();
-    CALL getAllBooksThatWereRead();
-    CALL getThisAuthorsData('Norton','Andre');
-    CALL getAllSeriesByThisAuthor('Weber', 'David');
-    CALL getAllSeriesData();
-    CALL getAllAuthorsData();
-    CALL getBookData('Weber', 'David', 'Honor of the Queen', 'Mass Market Paperback');
-    CALL getAuthorDataByLastName('Asimov'); -- This could be changed if more authors are added, such as all the Greens.
-    CALL putBookUpForSale('David', 'Weber', 'Honor of the Queen', 'Mass Market Paperback', 10.99, 7.99);
-    CALL finishedReadingBook('Stephen', 'Baxter', 'Stone Spring', 'Mass Market Paperback');
-    CALL finishedReadingBook('Stephen', 'Baxter', 'Bronze Summer', 'Mass Market Paperback');
-    CALL getAllBooksThatWereRead();
-    CALL getAllBooksForSale();
-    CALL getAllBooksInLib(); -- Test selecting all fields
+    -- CALL getAllBookFormatsWithKeys();
+    -- CALL getAllBookCategoriesWithKeys();
+    -- CALL getAllBooksInLib(); -- Test selecting all fields
+    -- CALL getAllBooksByThisAuthor('Baxter', 'Stephen');
+    -- CALL getAllWishListBooks();
+    -- CALL getAllBooksThatWereRead();
+    -- CALL getThisAuthorsData('Norton','Andre');
+    -- CALL getAllSeriesByThisAuthor('Weber', 'David');
+    -- CALL getAllSeriesData();
+    -- CALL getAllAuthorsData();
+    -- CALL getBookData('Weber', 'David', 'Honor of the Queen', 'Mass Market Paperback');
+    -- CALL getAuthorDataByLastName('Asimov'); -- This could be changed if more authors are added, such as all the Greens.
+    -- CALL getAllBooksSignedByAuthor();
+
+    CALL zzzUnitTestUserUpdates();
+
+    CALL getAllBooks(); -- Test selecting all fields all books
 
 END$$
 
