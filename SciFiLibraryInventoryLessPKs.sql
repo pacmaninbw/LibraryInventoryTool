@@ -128,8 +128,8 @@ DROP TABLE IF EXISTS `booklibinventory`.`isbn` ;
 
 CREATE TABLE IF NOT EXISTS `booklibinventory`.`isbn` (
   `BookFKiSBN` INT(10) UNSIGNED NOT NULL,
-  `ISBNumber` VARCHAR(32) NOT NULL,
-  PRIMARY KEY (`ISBNumber`, `BookFKiSBN`),
+  `ISBNumber` VARCHAR(32) NULL DEFAULT NULL,
+  PRIMARY KEY (`BookFKiSBN`),
   INDEX `ISBNumber` (`ISBNumber` ASC))
 ENGINE = InnoDB
 DEFAULT CHARACTER SET = utf8;
@@ -654,7 +654,7 @@ BEGIN
     -- instead of added to the library.
     -- Each independent portion of the data will have it's own add procedure that will be called here.
 
-    SET @bookKey = 0, @titleKey = 0, @formatKey = 0, @authorKey = 0, @seriesKey = 0;
+    SET @titleKey = 0, @formatKey = 0, @authorKey = 0, @seriesKey = 0;
 
     SET @authorKey = findAuthorKey(authorFirstName, authorLastName);
     
@@ -667,29 +667,29 @@ BEGIN
             SET @titleKey = insertTitleIfNotExist(titleStr);
             SET @categoryKey = findCategoryKeyFromStr(categoryName);
             
-            SET @bookKey = findBookKeyFromKeys(@authorKey, @titleKey, @formatKey);
-            IF @bookKey < 1 THEN
+            SET bookKey = findBookKeyFromKeys(@authorKey, @titleKey, @formatKey);
+            IF bookKey < 1 THEN
                 -- Don't add a book if it is already in the library. There will be special cases such as when a book has been signed by the author
                 -- but these will be added later.
                 INSERT INTO bookinfo (bookinfo.AuthorFKbi, bookinfo.TitleFKbi, bookinfo.CategoryFKbi, bookinfo.BookFormatFKbi, bookinfo.SeriesFKbi)
                     VALUES (@authorKey, @titleKey, @categoryKey, @formatKey, @seriesKey);
-                SET @bookKey := LAST_INSERT_ID();
+                SET bookKey := LAST_INSERT_ID();
                 
-                CALL insertOrUpdatePublishing(@bookKey, copyright, edition, printing, publisher, outOfPrint);
+                CALL insertOrUpdatePublishing(bookKey, copyright, edition, printing, publisher, outOfPrint);
                 IF iSBNumber IS NOT NULL OR LENGTH(iSBNumber) > 1 THEN
                     -- Mass Market Paperback Books older than 1985 may not have an isbn printed on them any where.
-                    CALL insertOrUpdateISBN(@bookKey, iSBNumber);
+                    CALL insertOrUpdateISBN(bookKey, iSBNumber);
                 END IF;
-                CALL insertOrUpdateOwned(@bookKey, isOwned, isWishListed);
-                CALL insertOrUpdateHaveRead(@bookKey, haveRead);
-                CALL insertOrUpdateVolumeInSeries(@bookKey, volumeNumber, @seriesKey);
+                CALL insertOrUpdateOwned(bookKey, isOwned, isWishListed);
+                CALL insertOrUpdateHaveRead(bookKey, haveRead);
+                CALL insertOrUpdateVolumeInSeries(bookKey, volumeNumber, @seriesKey);
                 IF isOwned > 0 THEN
-                    CALL insertOrUpdateForSale(@bookKey, isForSale, askingPrice, estimatedValue);
+                    CALL insertOrUpdateForSale(bookKey, isForSale, askingPrice, estimatedValue);
                 END IF;
-                CALL insertOrUpdateIsSignedByAuthor(@bookKey, iSignedByAuthor);
+                CALL insertOrUpdateIsSignedByAuthor(bookKey, iSignedByAuthor);
                 IF bookDescription IS NOT NULL OR LENGTH(bookDescription) > 0 THEN
                     -- Try to save space if there is no description.
-                    CALL insertOrUpdateSynopsis(@bookKey, bookDescription);
+                    CALL insertOrUpdateSynopsis(bookKey, bookDescription);
                 END IF;
             END IF;
             
@@ -733,36 +733,57 @@ CREATE PROCEDURE `buyBook`
 )
 BEGIN
 
-    
+    SET @estimatedValue = listPrice - 1.00;
+
+    SET @IsBookAlreadyInDB = findBookKeyFast(authorLastName, authorFirstName, TitleStr, bookFormatStr);
+    IF @IsBookAlreadyInDB < 1 THEN
+    -- The book was not already read or wishlisted.
     -- Some fields such as IsOwned are added by default because the book was purchased.
-    CALL addBookToLibrary(
-        categoryName,
-        authorLastName,
-        authorFirstName,
-        titleStr, 
-        bookFormatStr,
-        copyright,
-        edition,
-        printing,
-        publisher,
-        outOfPrint,
-        seriesName,
-        volumeNumber,
-        iSBNumber,
-        iSignedByAuthor,
-        1,  -- IsOwned
-        0,  -- IsWishlisted
-        0,  -- IsForsale
-        listPrice - 1.00,  -- Asking Price
-        listPrice - 1.00,  -- Estimated Value
-        0,  -- HaveReadBook
-        bookDescription,
-        @bookKey
-    );
-    
-    IF @bookKey IS NOT NULL AND @bookKey > 0 THEN
-        CALL insertOrUpdatePurchaseInfo(@bookKey, purchaseDate, listPrice, pricePaid, vendor);
+        CALL addBookToLibrary(
+            categoryName,
+            authorLastName,
+            authorFirstName,
+            titleStr, 
+            bookFormatStr,
+            copyright,
+            edition,
+            printing,
+            publisher,
+            outOfPrint,
+            seriesName,
+            volumeNumber,
+            iSBNumber,
+            iSignedByAuthor,
+            1,  -- IsOwned
+            0,  -- IsWishlisted
+            0,  -- IsForsale
+            @estimatedValue,  -- Asking Price
+            @estimatedValue,  -- Estimated Value
+            0,  -- HaveReadBook This is assumed to be false, this might be a bug.
+            bookDescription,
+            bookKey
+        );
+        IF bookKey IS NOT NULL AND bookKey > 0 THEN
+            CALL insertOrUpdatePurchaseInfo(bookKey, purchaseDate, listPrice, pricePaid, vendor);
+        END IF;
+    ELSE
+        SET bookKey = @IsBookAlreadyInDB;
+	-- The book was wishlisted or already read, update any changes.
+        CALL insertOrUpdatePurchaseInfo(bookKey, purchaseDate, listPrice, pricePaid, vendor);
+        CALL insertOrUpdatePublishing(bookKey, copyright, edition, printing, publisher, outOfPrint);
+        CALL insertOrUpdateOwned(bookKey, 1, 0);
+        CALL insertOrUpdateForSale(bookKey, 0, @estimatedValue, @estimatedValue);
+        CALL insertOrUpdateIsSignedByAuthor(bookKey, iSignedByAuthor);
+        IF iSBNumber IS NOT NULL OR LENGTH(iSBNumber) > 1 THEN
+            -- Mass Market Paperback Books older than 1985 may not have an isbn printed on them any where.
+            CALL insertOrUpdateISBN(bookKey, iSBNumber);
+        END IF;
+        IF bookDescription IS NOT NULL OR LENGTH(bookDescription) > 0 THEN
+            -- Try to save space if there is no description.
+            CALL insertOrUpdateSynopsis(bookKey, bookDescription);
+        END IF;
     END IF;
+    
     
 END$$
 
@@ -813,6 +834,7 @@ BEGIN
 
    --  DECLARE testCopyright VARCHAR(4);
     
+    SET @testKey = NULL;
     SELECT publishinginfo.Copyright INTO @testCopyright FROM publishinginfo WHERE publishinginfo.BookFKPubI = bookKey;
     
     IF @testCopyright IS NULL THEN
@@ -840,7 +862,7 @@ BEGIN
                 publishinginfo.Edition = edition,
                 publishinginfo.Printing = printing,
                 publishinginfo.Publisher = publisher,
-                publishinginfo.Copyright = outOfPrint
+                publishinginfo.OutOfPrint = outOfPrint
             WHERE publishinginfo.BookFKPubI = bookKey;
     END IF;
 END$$
@@ -864,6 +886,7 @@ CREATE PROCEDURE `insertOrUpdateOwned`
 )
 BEGIN
 
+    SET @testKey = NULL;
     SELECT owned.BookFKo INTO @testKey FROM owned WHERE owned.BookFKo = bookKey;
     
     IF @testKey IS NULL THEN
@@ -906,6 +929,7 @@ CREATE PROCEDURE `insertOrUpdateHaveRead`
 )
 BEGIN
 
+    SET @testKey = NULL;
     SELECT haveread.BookFKhr INTO @testKey FROM haveread WHERE haveread.BookFKhr = bookKey;
     
     IF @testKey IS NULL THEN
@@ -946,6 +970,7 @@ CREATE PROCEDURE `insertOrUpdateVolumeInSeries`
 )
 BEGIN
 
+    SET @testKey = NULL;
     SELECT volumeinseries.BookFKvs INTO @testKey FROM volumeinseries WHERE volumeinseries.BookFKvs = bookKey;
     
     IF @testKey IS NULL THEN
@@ -990,6 +1015,7 @@ CREATE PROCEDURE `insertOrUpdateForSale`
 )
 BEGIN
 
+    SET @testKey = NULL;
     SELECT forsale.BookFKfs INTO @testKey FROM forsale WHERE forsale.BookFKfs = bookKey;
     
     IF @testKey IS NULL THEN
@@ -1035,6 +1061,7 @@ CREATE PROCEDURE `insertOrUpdateIsSignedByAuthor`
 )
 BEGIN
 
+    SET @testKey = NULL;
     SELECT signedbyauthor.BookFKsba INTO @testKey FROM signedbyauthor WHERE signedbyauthor.BookFKsba = bookKey;
     
     IF @testKey IS NULL THEN
@@ -1074,6 +1101,7 @@ CREATE PROCEDURE `insertOrUpdateSynopsis`
 )
 BEGIN
 
+    SET @testKey = NULL;
     SELECT bksynopsis.BookFKbd INTO @testKey FROM bksynopsis WHERE bksynopsis.BookFKbd = bookKey;
     
     IF @testKey IS NULL THEN
@@ -1113,6 +1141,7 @@ CREATE PROCEDURE `insertOrUpdateISBN`
 )
 BEGIN
     
+    SET @testKey = NULL;
     SELECT isbn.BookFKiSBN INTO @testKey FROM isbn WHERE isbn.BookFKiSBN = bookKey;
     
     IF @testKey IS NULL THEN
@@ -1126,7 +1155,7 @@ BEGIN
             )
         ;
     ELSE
-        UPDATE HaveRead
+        UPDATE isbn
             SET
                 isbn.ISBNumber = iSBNumber
             WHERE isbn.BookFKiSBN = bookKey;
@@ -1155,6 +1184,7 @@ CREATE PROCEDURE `insertOrUpdatePurchaseInfo`
 )
 BEGIN
 
+    SET @testKey = NULL;
     SELECT purchaseinfo.BookFKPurI INTO @testKey FROM purchaseinfo WHERE purchaseinfo.BookFKPurI = bookKey;
     
     IF @testKey IS NULL THEN
@@ -2012,9 +2042,6 @@ USE `booklibinventory`$$
 CREATE PROCEDURE `initBookInventoryTool` ()
 BEGIN
 
-SET @procName = 'initBookInventoryTool';
-SELECT @procName;
-
 -- Initialize some basic formats, user can add more later.
     CALL addFormat('Hardcover');
     CALL addFormat('Trade Paperback');
@@ -2065,7 +2092,6 @@ USE `booklibinventory`$$
 CREATE PROCEDURE `zzzUnitTestAddAuthors` ()
 BEGIN
 SET @procName = 'zzzUnitTestAddAuthors';
-SELECT @procName;
 
     CALL addAuthor('Heinlein', 'Robert', 'Anson', '1907', '1988');
     CALL addAuthor('Asimov', 'Isaac', NULL, '1920', '1992');
@@ -2083,7 +2109,7 @@ SELECT @procName;
     CALL addAuthor('Knuth', 'Donald', 'Ervin', '1938', NULL);
     
     IF (SELECT COUNT(*) FROM authorstab) != 14 THEN
-        SELECT COUNT(*) FROM series;
+        SELECT @procName, COUNT(*) FROM series;
         SELECT * FROM series;
     END IF;
     
@@ -2103,7 +2129,6 @@ USE `booklibinventory`$$
 CREATE PROCEDURE `zzzUnitTestAddAuthorSeries` ()
 BEGIN
 SET @procName = 'zzzUnitTestAddAuthorSeries';
-SELECT @procName;
 
     CALL addAuthorSeries('David', 'Weber', 'Safehold');
     CALL addAuthorSeries('David', 'Weber', 'Honor Harrington');
@@ -2111,12 +2136,12 @@ SELECT @procName;
     CALL addAuthorSeries('Marion', 'Zimmer Bradley', 'Darkover');
     CALL addAuthorSeries('Isaac', 'Asimov', 'Foundation');
     CALL addAuthorSeries('Stephen', 'Baxter', 'Northland');
-    CALL addAuthorSeries('Donald', 'Knuth', 'The Art of Computing Programming');
+    CALL addAuthorSeries('Donald', 'Knuth', 'The Art of Computer Programming');
 -- The follow statement should fail to insert the series since John Ringo has not been added to authorstab.
     CALL addAuthorSeries('John', 'Ringo', 'Kildar');
 
     IF (SELECT COUNT(*) FROM series) != 7 THEN
-        SELECT COUNT(*) FROM series;
+        SELECT @procName, COUNT(*) FROM series;
         SELECT * FROM series;
     END IF;
     
@@ -2161,40 +2186,39 @@ BEGIN
     DECLARE bookKey INT;
 
 SET @procName = 'zzzUnitTestAddBookToLibrary';
-SELECT @procName;
 
     CALL addBookToLibrary('Fiction: Science Fiction', 'Weber', 'David', 'On Basilisk Station',  'Mass Market Paperback', '1993', 1, 9, 'Baen Books', 0, 'Honor Harrington', 1,
         '0-7434-3571-0', 0, 1, 0, 0, 8.99, 8.99, 1, 'bookDescription', bookKey);
     IF (bookKey != 1) THEN
-        SELECT bookKey;
+        SELECT @procName, bookKey;
         SELECT COUNT(*) FROM bookinfo;
     END IF;
 
     CALL addBookToLibrary('Fiction: Science Fiction', 'Weber', 'David', 'Honor of the Queen',  'Mass Market Paperback', '1993', 1, 10, 'Baen Books', 0, 'Honor Harrington', 2,
         '978-0-7434-3572-7', 0, 1, 0, 0, 6.99, 6.99, 1, NULL, bookKey);
     IF (bookKey != 2) THEN
-        SELECT bookKey;
+        SELECT @procName, bookKey;
         SELECT COUNT(*) FROM bookinfo;
     END IF;
 
     CALL addBookToLibrary('Fiction: Science Fiction', 'Weber', 'David', 'Short Victorious War',  'Mass Market Paperback', '1994', 1, 8, 'Baen Books', 0, 'Honor Harrington', 3,
         '0-7434-3573-7', 0, 1, 0, 0, 6.99, 6.99, 1, NULL, bookKey);
     IF (bookKey != 3) THEN
-        SELECT bookKey;
+        SELECT @procName, bookKey;
         SELECT COUNT(*) FROM bookinfo;
     END IF;
 
     CALL addBookToLibrary('Fiction: Science Fiction', 'Weber', 'David', 'Field of Dishonor',  'Mass Market Paperback', '1994', 1, 6, 'Baen Books', 0, 'Honor Harrington', 4,
         '0-7434-3574-5', 0, 1, 0, 0, 7.99, 7.99, 1, NULL, bookKey);
     IF (bookKey != 4) THEN
-        SELECT bookKey;
+        SELECT @procName, bookKey;
         SELECT COUNT(*) FROM bookinfo;
     END IF;
 
     CALL addBookToLibrary('Fiction: Science Fiction', 'Norton', 'Andre', 'Star Guard',  'Mass Market Paperback', '1955', 1, NULL, 'Harcourt', 0, NULL, NULL,
         NULL, 0, 0, 1, NULL, NULL, NULL, 1, NULL, bookKey);
     IF (bookKey != 5) THEN
-        SELECT bookKey;
+        SELECT @procName, bookKey;
         SELECT COUNT(*) FROM bookinfo;
     END IF;
 
@@ -2203,56 +2227,56 @@ SELECT @procName;
     CALL addBookToLibrary('Fiction: Science Fiction', 'Brin', 'David', 'Uplift War',  'Hard Cover', '1987', 1, 1, 'Phantasia Press', 0, NULL, NULL,
         0-932096-44-1, 1, 1, 0, 0, 100.00, 100.00, 1, NULL, bookKey);
     IF (bookKey != 0) THEN
-        SELECT bookKey;
+        SELECT @procName, bookKey;
         SELECT COUNT(*) FROM bookinfo;
     END IF;
     IF (SELECT COUNT(*) FROM bookinfo) != 5 THEN
-        SELECT COUNT(*) FROM bookInfo;
+        SELECT @procName, COUNT(*) FROM bookInfo;
         SELECT * FROM bookInfo;
     END IF;
 
     IF (SELECT COUNT(*) FROM publishinginfo) != 5 THEN
-        SELECT COUNT(*) FROM publishinginfo;
+        SELECT @procName, COUNT(*) FROM publishinginfo;
         SELECT * FROM publishinginfo;
     END IF;
 
     IF (SELECT COUNT(*) FROM bksynopsis) != 1 THEN
-        SELECT COUNT(*) FROM bksynopsis;
+        SELECT @procName, COUNT(*) FROM bksynopsis;
         SELECT * FROM bksynopsis;
     END IF;
 
     IF (SELECT COUNT(*) FROM forsale) != 4 THEN
-        SELECT COUNT(*) FROM forsale;
+        SELECT @procName, COUNT(*) FROM forsale;
         SELECT * FROM forsale;
     END IF;
 
     IF (SELECT COUNT(*) FROM haveread) != 5 THEN
-        SELECT COUNT(*) FROM haveread;
+        SELECT @procName, COUNT(*) FROM haveread;
         SELECT * FROM haveread;
     END IF;
 
     IF (SELECT COUNT(*) FROM owned) != 5 THEN
-        SELECT COUNT(*) FROM owned;
+        SELECT @procName, COUNT(*) FROM owned;
         SELECT * FROM owned;
     END IF;
 
     IF (SELECT COUNT(*) FROM signedbyauthor) != 5 THEN
-        SELECT COUNT(*) FROM signedbyauthor;
+        SELECT @procName, COUNT(*) FROM signedbyauthor;
         SELECT * FROM signedbyauthor;
     END IF;
 
     IF (SELECT COUNT(*) FROM isbn) != 4 THEN
-        SELECT COUNT(*) FROM isbn;
+        SELECT @procName, COUNT(*) FROM isbn;
         SELECT * FROM isbn;
     END IF;
 
     IF (SELECT COUNT(*) FROM purchaseinfo) != 0 THEN
-        SELECT COUNT(*) FROM purchaseinfo;
+        SELECT @procName, COUNT(*) FROM purchaseinfo;
         SELECT * FROM purchaseinfo;
     END IF;
 
     IF (SELECT COUNT(*) FROM title) != 5 THEN
-        SELECT COUNT(*) FROM title;
+        SELECT @procName, COUNT(*) FROM title;
         SELECT * FROM title;
     END IF;
 
@@ -2271,8 +2295,6 @@ DELIMITER $$
 USE `booklibinventory`$$
 CREATE PROCEDURE `zzzUnitTestUserUpdates` ()
 BEGIN
-SET @procName = 'zzzUnitTestUserUpdates';
-SELECT @procName;
 
 /*
  * This procedure tests the buyBook procedure. Since the buyBook procedure call addBookToLibrary, everything tested
@@ -2280,29 +2302,37 @@ SELECT @procName;
  *
  */
 
+    DECLARE bookKey INT;
+    SET @procName = 'zzzUnitTestUserUpdates';
+
     SELECT COUNT(*) INTO @forSaleCount FROM forsale WHERE forsale.IsForSale = 1;
     CALL putBookUpForSale('David', 'Weber', 'Honor of the Queen', 'Mass Market Paperback', 10.99, 7.99);
     IF (SELECT COUNT(*) FROM forsale WHERE forsale.IsForSale = 1) != (@forSaleCount + 1) THEN
-        SELECT COUNT(*) FROM forsale;
+        SELECT @procName, COUNT(*) FROM forsale;
         SELECT * FROM forsale;
     END IF;
     SELECT COUNT(*) INTO @forSaleCount FROM forsale;
-    CALL getAllBooksForSale();
+    -- CALL getAllBooksForSale();
     
     SELECT COUNT(*) INTO @haveReadCount FROM haveread WHERE haveread.HaveReadBook = 1;
     CALL finishedReadingBook('Stephen', 'Baxter', 'Stone Spring', 'Mass Market Paperback');
     CALL finishedReadingBook('Stephen', 'Baxter', 'Bronze Summer', 'Mass Market Paperback');
     IF (SELECT COUNT(*) FROM haveread WHERE haveread.HaveReadBook = 1) != (@haveReadCount + 2) THEN
-        SELECT COUNT(*) FROM haveread;
+        SELECT @procName, COUNT(*) FROM haveread;
         SELECT * FROM haveread;
     END IF;
-    CALL getAllBooksThatWereRead();
+    -- CALL getAllBooksThatWereRead();
 
     CALL bookSold('David', 'Weber', 'Honor of the Queen', 'Mass Market Paperback');
     IF (SELECT COUNT(*) FROM forsale) != (@forSaleCount - 1) THEN
-        SELECT COUNT(*) FROM forsale;
+        SELECT @procName, COUNT(*) FROM forsale;
         SELECT * FROM forsale;
     END IF;
+
+    -- Test update buy buying wish listed book.
+    Set @buyDate = CURDATE();
+    CALL buyBook('Fiction: Science Fiction', 'Norton', 'Andre', 'Star Guard',  'Mass Market Paperback', '1955', 3, 4, 'Harcourt', 0, NULL, NULL,
+        '978-0-345-35036-7', 0,  'Testing 1 2 3', @buyDate, 7.99, 7.99, 'Amazon', bookKey);
 
 END$$
 
@@ -2329,78 +2359,77 @@ BEGIN
     DECLARE buyDate DATE;
 
 SET @procName = 'zzzUnitTestBuyBook';
-SELECT @procName;
 
     Set buyDate = CURDATE();
 
     CALL buyBook('Fiction: Science Fiction', 'Baxter', 'Stephen', 'Stone Spring',  'Mass Market Paperback', '2010', 1, 1, 'Roc', 0, 'Northland', 1,
         '978-0-451-46446-0', 0, 'The start of the Great Wall of Northland.', buyDate, 7.99, 7.19, 'Barnes & Noble', bookKey);
     IF (bookKey != 6) THEN
-        SELECT bookKey;
-        SELECT COUNT(*) FROM bookinfo;
+	SET @eMsg = CONCAT(@procName, ' Expected value is 6');
+        SELECT @eMsg, bookKey, COUNT(*) FROM bookinfo;
     END IF;
 
     CALL buyBook('Fiction: Science Fiction', 'Baxter', 'Stephen', 'Bronze Summer',  'Mass Market Paperback', '2011', 1, 1, 'Roc', 0, 'Northland', 2,
         '978-0-451-41486-1', 0, 'The Golden Age of Northland', buyDate, 9.99, 8.99, 'Barnes & Noble', bookKey);
     IF (bookKey != 7) THEN
-        SELECT bookKey;
-        SELECT COUNT(*) FROM bookinfo;
+	SET @eMsg = CONCAT(@procName, ' Expected value is 7');
+        SELECT @eMsg, bookKey, COUNT(*) FROM bookinfo;
     END IF;
 
     CALL buyBook('Fiction: Science Fiction', 'Baxter', 'Stephen', 'Iron Winter',  'Mass Market Paperback', '2012', 1, 1, 'Roc', 0, 'Northland', 3,
         '978-0-451-41919-4', 0, NULL, buyDate, 7.99, 7.19, 'Barnes & Noble', bookKey);
     IF (bookKey != 8) THEN
-        SELECT bookKey;
-        SELECT COUNT(*) FROM bookinfo;
+	SET @eMsg = CONCAT(@procName, ' Expected value is 8');
+        SELECT @eMsg, bookKey, COUNT(*) FROM bookinfo;
     END IF;
 
     IF (SELECT COUNT(*) FROM bookinfo) != 8 THEN
-        SELECT COUNT(*) FROM bookInfo;
+        SELECT @procName, COUNT(*) FROM bookInfo;
         SELECT * FROM bookInfo;
     END IF;
 
     IF (SELECT COUNT(*) FROM publishinginfo) != 8 THEN
-        SELECT COUNT(*) FROM publishinginfo;
+        SELECT @procName, COUNT(*) FROM publishinginfo;
         SELECT * FROM publishinginfo;
     END IF;
 
     IF (SELECT COUNT(*) FROM bksynopsis) != 3 THEN
-        SELECT COUNT(*) FROM bksynopsis;
+        SELECT @procName, COUNT(*) FROM bksynopsis;
         SELECT * FROM bksynopsis;
     END IF;
 
     IF (SELECT COUNT(*) FROM forsale) != 7 THEN
-        SELECT COUNT(*) FROM forsale;
+        SELECT @procName, COUNT(*) FROM forsale;
         SELECT * FROM forsale;
     END IF;
 
     IF (SELECT COUNT(*) FROM haveread) != 8 THEN
-        SELECT COUNT(*) FROM haveread;
+        SELECT @procName, COUNT(*) FROM haveread;
         SELECT * FROM haveread;
     END IF;
 
     IF (SELECT COUNT(*) FROM owned) != 8 THEN
-        SELECT COUNT(*) FROM owned;
+        SELECT @procName, COUNT(*) FROM owned;
         SELECT * FROM owned;
     END IF;
 
     IF (SELECT COUNT(*) FROM signedbyauthor) != 8 THEN
-        SELECT COUNT(*) FROM signedbyauthor;
+        SELECT @procName, COUNT(*) FROM signedbyauthor;
         SELECT * FROM signedbyauthor;
     END IF;
 
     IF (SELECT COUNT(*) FROM isbn) != 7 THEN
-        SELECT COUNT(*) FROM isbn;
+        SELECT @procName, COUNT(*) FROM isbn;
         SELECT * FROM isbn;
     END IF;
 
     IF (SELECT COUNT(*) FROM purchaseinfo) != 3 THEN
-        SELECT COUNT(*) FROM purchaseinfo;
+        SELECT @procName, COUNT(*) FROM purchaseinfo;
         SELECT * FROM purchaseinfo;
     END IF;
 
     IF (SELECT COUNT(*) FROM title) != 8 THEN
-        SELECT COUNT(*) FROM title;
+        SELECT @procName, COUNT(*) FROM title;
         SELECT * FROM title;
     END IF;
 
@@ -2421,31 +2450,30 @@ CREATE PROCEDURE `zzzUnitTestInitProcedure` ()
 BEGIN
 
 SET @procName = 'zzzUnitTestInitProcedure';
-SELECT @procName;
 
     CALL initBookInventoryTool();
     SELECT COUNT(*) INTO @formatCount FROM booklibinventory.bookformat;
     IF @formatCount != 8 THEN
-        SELECT @formatCount;
+        SELECT @procName, @formatCount;
         SELECT * FROM bookformat;
     END IF;
     -- the following call to addFormat should result in no changed to the database
     -- since eBook PDF is already in the database.
     CALL addFormat('eBook PDF');
     IF (SELECT COUNT(*) FROM bookformat) != @formatCount THEN
-        SELECT @formatCount, COUNT(*) FROM bookformat;
+        SELECT @procName, @formatCount, COUNT(*) FROM bookformat;
         SELECT * FROM bookformat;
     END IF;
 
     SELECT COUNT(*) INTO @categoryCount FROM bookcategories;
     IF @categoryCount != 18 THEN
-        SELECT @categoryCount;
+        SELECT @procName, @categoryCount;
         SELECT * FROM bookcategories;
     END IF;
     -- Should not be added a second time.
     CALL addCategory('Non-Fiction: Electrical Engineering');
     IF (SELECT COUNT(*) FROM bookcategories) != @categoryCount THEN
-        SELECT @categoryCount, COUNT(*) FROM bookcategories;
+        SELECT @procName, @categoryCount, COUNT(*) FROM bookcategories;
         SELECT * FROM bookcategories;
     END IF;
     
@@ -2466,7 +2494,6 @@ CREATE PROCEDURE `zzzUnitTestFunctions` ()
 BEGIN
 
 SET @procName = 'zzzUnitTestFunctions';
-SELECT @procName;
 
     /*
      * The functions not explicitly tested here are tested indirectly 
@@ -2475,40 +2502,85 @@ SELECT @procName;
 
     SET @authorKey = findAuthorKey('Arthur','Clarke');
     IF @authorKey != 3 THEN
-        SELECT @authorKey;
+        SELECT @procName, @authorKey;
         SELECT authorstab.FirstName, authorstab.LastName FROM authorstab WHERE idAuthors = @authorKey;
     END IF;
 
     SET @bookKey = findBookKeyFast('Baxter', 'Stephen', 'Stone Spring', 'Mass Market Paperback');
     IF (@bookKey != 6) THEN
-        SELECT @bookKey;
+        SELECT @procName, @bookKey;
         SELECT * FROM bookinfo WHERE bookinfo.idBookInfo = @bookKey;
     END IF;
 
     SET @titleKey = findTitleKey('Star Guard');
     IF (@titleKey != 5) THEN
-        SELECT @titleKey;
+        SELECT @procName, @titleKey;
         SELECT * FROM title WHERE title.idTitle = @titleKey;
     END IF;
 
     SET @categoryKey = findCategoryKeyFromStr('Non-Fiction: Electrical Engineering');
     IF (@categoryKey != 5) THEN
-        SELECT @categoryKey;
+        SELECT @procName, @categoryKey;
         SELECT * FROM bookcategories; -- WHERE bookcategories.idBookCategories = @categoryKey;
     END IF;
 
     SET @formatKey = findFormatKeyFromStr('Mass Market Paperback');
     IF (@formatKey != 3) THEN
-        SELECT @formatKey;
+        SELECT @procName, @formatKey;
         SELECT * FROM bookformat WHERE bookformat.idFormat = @formatKey;
     END IF;
 
     SET @seriesKey = findSeriesKey('David', 'Weber', 'Honorverse');
     IF (@seriesKey != 3) THEN
-        SELECT @seriesKey;
+        SELECT @procName, @seriesKey;
         SELECT * FROM series WHERE series.idSeries = @seriesKey;
     END IF;
 
+END$$
+
+DELIMITER ;
+
+-- -----------------------------------------------------
+-- procedure addMoreBooksForInterst
+-- -----------------------------------------------------
+
+USE `booklibinventory`;
+DROP procedure IF EXISTS `booklibinventory`.`addMoreBooksForInterst`;
+
+DELIMITER $$
+USE `booklibinventory`$$
+CREATE PROCEDURE `addMoreBooksForInterst` ()
+BEGIN
+
+    DECLARE bookKey INT;
+SET @procName = 'addMoreBooksForInterst';
+
+    -- These 3 books are not included in the previous testing.
+    CALL addBookToLibrary('Non-Fiction: Computer', 'Knuth', 'Donald', 'Fundamental Algorithms',  'Hardcover', '1973', 2, NULL, 'Addison Wesley', 0, 'The Art of Computer Programming', 1,
+        '0-201-03809-9', 0, 1, 0, 0, 0.00, 0.00, 1, NULL, bookKey);
+    IF bookKey = 0 THEN
+        SET @emsg = 'Failed to add Fundamental Algorithms';
+        SELECT emsg;
+    END IF;
+    CALL addBookToLibrary('Non-Fiction: Computer', 'Knuth', 'Donald', 'Seminumerical Algorithms',  'Hardcover', '1981', 2, NULL, 'Addison Wesley', 0, 'The Art of Computer Programming', 2,
+        '0-201-03822-6', 0, 1, 0, 0, 0.00, 0.00, 1, NULL, bookKey);
+    IF bookKey = 0 THEN
+        SET @emsg = 'Failed to add Seminumerical Algorithms';
+        SELECT emsg;
+    END IF;
+    CALL addBookToLibrary('Non-Fiction: Computer', 'Knuth', 'Donald', 'Sorting and Searching',  'Hardcover', '1973', 2, NULL, 'Addison Wesley', 0, 'The Art of Computer Programming', 3,
+        '0-201-03803-X', 0, 1, 0, 0, 0.00, 0.00, 1, NULL, bookKey);
+    IF bookKey = 0 THEN
+        SET @emsg = 'Failed to add Sorting and Searching';
+        SELECT emsg;
+        SELECT * from authorstab;
+        SELECT * from series;
+    END IF;
+    CALL addAuthor('Brin', 'David', 'Glen', '1950', NULL);
+    CALL addAuthorSeries('David', 'Brin', 'The Uplift Saga');
+    CALL addBookToLibrary('Fiction: Science Fiction', 'Brin', 'David', 'Uplift War',  'Hardcover', '1987', 1, 1, 'Phantasia Press', 0, 'The Uplift Saga', 3,
+        '0-932096-44-1', 1, 1, 0, 0, 100.00, 100.00, 1, NULL, bookKey);
+    
 END$$
 
 DELIMITER ;
@@ -2533,7 +2605,7 @@ BEGIN
      * then a select is run to show the error. No output means no errors.
      */
 
-    DECLARE bookKey INT;
+    SET @ShowAllResults = 1;
 
     CALL zzzUnitTestInitProcedure();
     CALL zzzUnitTestAddAuthors();
@@ -2542,50 +2614,27 @@ BEGIN
     CALL zzzUnitTestBuyBook();
     CALL zzzUnitTestFunctions();
 
-    -- These 3 books are not included in the previous testing.
-    CALL addBookToLibrary('Non-Fiction: Computer', 'Knuth', 'Donald', 'Fundamental Algorithms',  'Hardcover', '1973', 2, NULL, 'Addison Wesley', 0, 'The Art of Computer Proramming', 1,
-        '0-201-03809-9', 0, 1, 0, 0, 0.00, 0.00, 1, NULL, bookKey);
-    IF bookKey = 0 THEN
-        SET @emsg = 'Failed to add Fundamental Algorithms';
-        SELECT emsg;
-    END IF;
-    CALL addBookToLibrary('Non-Fiction: Computer', 'Knuth', 'Donald', 'Seminumerical Algorithms',  'Hardcover', '1981', 2, NULL, 'Addison Wesley', 0, 'The Art of Computer Proramming', 2,
-        '0-201-03822-6', 0, 1, 0, 0, 0.00, 0.00, 1, NULL, bookKey);
-    IF bookKey = 0 THEN
-        SET @emsg = 'Failed to add Seminumerical Algorithms';
-        SELECT emsg;
-    END IF;
-    CALL addBookToLibrary('Non-Fiction: Computer', 'Knuth', 'Donald', 'Sorting and Searching',  'Hardcover', '1973', 2, NULL, 'Addison Wesley', 0, 'The Art of Computer Proramming', 3,
-        '0-201-03803-X', 0, 1, 0, 0, 0.00, 0.00, 1, NULL, bookKey);
-    IF bookKey = 0 THEN
-        SET @emsg = 'Failed to add Sorting and Searching';
-        SELECT emsg;
-        SELECT * from authorstab;
-        SELECT * from series;
-    END IF;
-    CALL addAuthor('Brin', 'David', 'Glen', '1950', NULL);
-    CALL addAuthorSeries('David', 'Brint', 'The Uplift Saga');
-    CALL addBookToLibrary('Fiction: Science Fiction', 'Brin', 'David', 'Uplift War',  'Hardcover', '1987', 1, 1, 'Phantasia Press', 0, 'The Uplift Saga', 3,
-        '0-932096-44-1', 1, 1, 0, 0, 100.00, 100.00, 1, NULL, bookKey);
+    CALL addMoreBooksForInterst();
 
     -- Test all the data retrieval procedures to see that they return data rows.
     -- These tests by default will provide output.
-    -- CALL getAllBookFormatsWithKeys();
-    -- CALL getAllBookCategoriesWithKeys();
-    -- CALL getAllBooksInLib(); -- Test selecting all fields
-    -- CALL getAllBooksByThisAuthor('Baxter', 'Stephen');
-    -- CALL getAllWishListBooks();
-    -- CALL getAllBooksThatWereRead();
-    -- CALL getThisAuthorsData('Norton','Andre');
-    -- CALL getAllSeriesByThisAuthor('Weber', 'David');
-    -- CALL getAllSeriesData();
-    -- CALL getAllAuthorsData();
-    -- CALL getBookData('Weber', 'David', 'Honor of the Queen', 'Mass Market Paperback');
-    -- CALL getAuthorDataByLastName('Asimov'); -- This could be changed if more authors are added, such as all the Greens.
-    -- CALL getAllBooksSignedByAuthor();
+    IF @showAllResults > 0 THEN
+        CALL getAllBookFormatsWithKeys();
+        CALL getAllBookCategoriesWithKeys();
+        CALL getAllBooksInLib(); -- Test selecting all fields
+        CALL getAllBooksByThisAuthor('Baxter', 'Stephen');
+        CALL getAllWishListBooks();
+        CALL getAllBooksThatWereRead();
+        CALL getThisAuthorsData('Norton','Andre');
+        CALL getAllSeriesByThisAuthor('Weber', 'David');
+        CALL getAllSeriesData();
+        CALL getAllAuthorsData();
+        CALL getBookData('Weber', 'David', 'Honor of the Queen', 'Mass Market Paperback');
+        CALL getAuthorDataByLastName('Asimov'); -- This could be changed if more authors are added, such as all the Greens.
+        CALL getAllBooksSignedByAuthor();
+    END IF;
 
     CALL zzzUnitTestUserUpdates();
-
     CALL getAllBooks(); -- Test selecting all fields all books
 
 END$$
