@@ -768,7 +768,7 @@ BEGIN
         END IF;
     ELSE
         SET bookKey = @IsBookAlreadyInDB;
-	-- The book was wishlisted or already read, update any changes.
+        -- The book was wishlisted or already read, update any changes.
         CALL insertOrUpdatePurchaseInfo(bookKey, purchaseDate, listPrice, pricePaid, vendor);
         CALL insertOrUpdatePublishing(bookKey, copyright, edition, printing, publisher, outOfPrint);
         CALL insertOrUpdateOwned(bookKey, 1, 0);
@@ -800,14 +800,70 @@ DELIMITER $$
 USE `booklibinventory`$$
 CREATE PROCEDURE `deleteAuthor`
 (
+    IN authorLast VARCHAR(20),
     IN authorFirst VARCHAR(20),
-    IN authorMiddle VARCHAR(20),
-    IN authorLast VARCHAR(20)
+    IN authorMiddle VARCHAR(20)
 )
 BEGIN
     -- This procedure deletes everything associated with the specified author
     -- including books, series and volumes in series. It affects almost every table
     -- in this database.
+    -- Do not delete formats and categories.
+
+    DELETE a, BKI, s, v, i, sba, pub, pur, o, fs, hr, BDesk
+        FROM authorstab AS a 
+        LEFT JOIN series AS s ON s.AuthorFK = a.idAuthors
+        LEFT JOIN volumeinseries AS v ON v.SeriesFK = s.idSeries
+        INNER JOIN bookinfo AS BKI ON BKI.AuthorFKbi = a.idAuthors
+        LEFT JOIN isbn AS i ON i.BookFKiSBN = BKI.idBookInfo
+        LEFT JOIN signedbyauthor AS sba ON sba.BookFKsba = BKI.idBookInfo
+        LEFT JOIN publishinginfo AS pub ON pub.BookFKPubI = BKI.idBookInfo
+        LEFT JOIN purchaseinfo AS pur ON pur.BookFKPurI = BKI.idBookInfo
+        LEFT JOIN owned AS o ON o.BookFKo = BKI.idBookInfo
+        LEFT JOIN forsale AS fs ON fs.BookFKfs = BKI.idBookInfo
+        LEFT JOIN haveread AS hr ON hr.BookFKhr = BKI.idBookInfo
+        LEFT JOIN bksynopsis AS BDesk ON BDesk.BookFKbd = BKI.idBookInfo 
+        WHERE a.LastName = authorLast AND a.FirstName = authorFirst AND a.MiddleName = authorMiddle;
+END$$
+
+DELIMITER ;
+
+-- -----------------------------------------------------
+-- procedure deleteBook
+-- -----------------------------------------------------
+
+USE `booklibinventory`;
+DROP procedure IF EXISTS `booklibinventory`.`deleteBook`;
+
+DELIMITER $$
+USE `booklibinventory`$$
+CREATE PROCEDURE `deleteBook`
+(
+    IN authorLast VARCHAR(20),
+    IN authorFirst VARCHAR(20),
+    IN titleStr VARCHAR(128),
+    IN formatStr VARCHAR(45)
+)
+BEGIN
+
+    -- Do not delete authors, titles, series, formats or categories. These may be shared with other books.
+
+    DELETE BKI, i, sba, pub, pur, v, o, fs, hr, BDesk
+        FROM bookinfo AS BKI 
+        INNER JOIN authorsTab AS a ON a.idAuthors = BKI.AuthorFKbi
+        INNER JOIN title AS t ON t.idTitle = BKI.TitleFKbi
+        INNER JOIN bookformat AS bf ON bf.idFormat = BKI.BookFormatFKBi
+        LEFT JOIN isbn AS i ON i.BookFKiSBN = BKI.idBookInfo
+        LEFT JOIN signedbyauthor AS sba ON sba.BookFKsba = BKI.idBookInfo
+        LEFT JOIN publishinginfo AS pub ON pub.BookFKPubI = BKI.idBookInfo
+        LEFT JOIN purchaseinfo AS pur ON pur.BookFKPurI = BKI.idBookInfo
+        LEFT JOIN volumeinseries AS v ON v.BookFKvs = BKI.idBookInfo
+        LEFT JOIN owned AS o ON o.BookFKo = BKI.idBookInfo
+        LEFT JOIN forsale AS fs ON fs.BookFKfs = BKI.idBookInfo
+        LEFT JOIN haveread AS hr ON hr.BookFKhr = BKI.idBookInfo
+        LEFT JOIN bksynopsis AS BDesk ON BDesk.BookFKbd = BKI.idBookInfo 
+        WHERE a.LastName = authorLast AND a.FirstName = authorFirst AND t.TitleStr = titleStr and bf.FormatName = formatStr;
+
 END$$
 
 DELIMITER ;
@@ -1305,7 +1361,7 @@ END$$
 DELIMITER ;
 
 /*
- * Data retrieval functions.
+ * Data retrieval functions and queries.
  */
 
 -- -----------------------------------------------------
@@ -2365,21 +2421,21 @@ SET @procName = 'zzzUnitTestBuyBook';
     CALL buyBook('Fiction: Science Fiction', 'Baxter', 'Stephen', 'Stone Spring',  'Mass Market Paperback', '2010', 1, 1, 'Roc', 0, 'Northland', 1,
         '978-0-451-46446-0', 0, 'The start of the Great Wall of Northland.', buyDate, 7.99, 7.19, 'Barnes & Noble', bookKey);
     IF (bookKey != 6) THEN
-	SET @eMsg = CONCAT(@procName, ' Expected value is 6');
+        SET @eMsg = CONCAT(@procName, ' Expected value is 6');
         SELECT @eMsg, bookKey, COUNT(*) FROM bookinfo;
     END IF;
 
     CALL buyBook('Fiction: Science Fiction', 'Baxter', 'Stephen', 'Bronze Summer',  'Mass Market Paperback', '2011', 1, 1, 'Roc', 0, 'Northland', 2,
         '978-0-451-41486-1', 0, 'The Golden Age of Northland', buyDate, 9.99, 8.99, 'Barnes & Noble', bookKey);
     IF (bookKey != 7) THEN
-	SET @eMsg = CONCAT(@procName, ' Expected value is 7');
+        SET @eMsg = CONCAT(@procName, ' Expected value is 7');
         SELECT @eMsg, bookKey, COUNT(*) FROM bookinfo;
     END IF;
 
     CALL buyBook('Fiction: Science Fiction', 'Baxter', 'Stephen', 'Iron Winter',  'Mass Market Paperback', '2012', 1, 1, 'Roc', 0, 'Northland', 3,
         '978-0-451-41919-4', 0, NULL, buyDate, 7.99, 7.19, 'Barnes & Noble', bookKey);
     IF (bookKey != 8) THEN
-	SET @eMsg = CONCAT(@procName, ' Expected value is 8');
+        SET @eMsg = CONCAT(@procName, ' Expected value is 8');
         SELECT @eMsg, bookKey, COUNT(*) FROM bookinfo;
     END IF;
 
@@ -2586,6 +2642,90 @@ END$$
 DELIMITER ;
 
 -- -----------------------------------------------------
+-- procedure zzzUnitTestDelete
+-- -----------------------------------------------------
+
+USE `booklibinventory`;
+DROP procedure IF EXISTS `booklibinventory`.`zzzUnitTestDelete`;
+
+DELIMITER $$
+USE `booklibinventory`$$
+CREATE PROCEDURE `zzzUnitTestDelete` ()
+BEGIN
+        
+    SELECT COUNT(*) INTO @bookCount FROM bookinfo;
+
+    CALL deleteBook('Weber', 'David', 'Honor of the Queen', 'Mass Market Paperback');
+
+    IF (SELECT COUNT(*) FROM bookinfo) != (@bookCount - 1) THEN
+        SELECT * FROM bookinfo;
+    END IF;
+    SET @bookCount = @bookCount - 1;
+    IF (SELECT COUNT(*) FROM isbn) > @bookCount THEN
+        SELECT * FROM isbn;
+    END IF;
+    IF (SELECT COUNT(*) FROM signedbyauthor) > @bookCount THEN
+        SELECT * FROM signedbyauthor;
+    END IF;
+    IF (SELECT COUNT(*) FROM haveread) > @bookCount THEN
+        SELECT * FROM haveread;
+    END IF;
+    IF (SELECT COUNT(*) FROM forsale) > @bookCount THEN
+        SELECT * FROM forsale;
+    END IF;
+    IF (SELECT COUNT(*) FROM owned) > @bookCount THEN
+        SELECT * FROM owned;
+    END IF;
+    IF (SELECT COUNT(*) FROM purchaseinfo) > @bookCount THEN
+        SELECT * FROM purchaseinfo;
+    END IF;
+    IF (SELECT COUNT(*) FROM publishinginfo) > @bookCount THEN
+        SELECT * FROM publishinginfo;
+    END IF;
+
+    SELECT COUNT(*) INTO @bookCount FROM bookinfo;
+    SELECT COUNT(*) INTO @seriesCount FROM series;
+    SELECT COUNT(*) INTO @authorCount FROM authorstab;
+
+    CALL deleteAuthor('Knuth', 'Donald', 'Ervin');
+
+    IF (SELECT COUNT(*) FROM bookinfo) != (@bookCount - 3) THEN
+        SELECT * FROM bookinfo;
+    END IF;
+    IF (SELECT COUNT(*) FROM series) != (@seriesCount - 1) THEN
+        SELECT * FROM series;
+    END IF;
+    IF (SELECT COUNT(*) FROM authorstab) != (@authorsCount - 1) THEN
+        SELECT * FROM authors;
+    END IF;
+    SET @bookCount = @bookCount - 3;
+    IF (SELECT COUNT(*) FROM isbn) > @bookCount THEN
+        SELECT * FROM isbn;
+    END IF;
+    IF (SELECT COUNT(*) FROM signedbyauthor) > @bookCount THEN
+        SELECT * FROM signedbyauthor;
+    END IF;
+    IF (SELECT COUNT(*) FROM haveread) > @bookCount THEN
+        SELECT * FROM haveread;
+    END IF;
+    IF (SELECT COUNT(*) FROM forsale) > @bookCount THEN
+        SELECT * FROM forsale;
+    END IF;
+    IF (SELECT COUNT(*) FROM owned) > @bookCount THEN
+        SELECT * FROM owned;
+    END IF;
+    IF (SELECT COUNT(*) FROM purchaseinfo) > @bookCount THEN
+        SELECT * FROM purchaseinfo;
+    END IF;
+    IF (SELECT COUNT(*) FROM publishinginfo) > @bookCount THEN
+        SELECT * FROM publishinginfo;
+    END IF;
+
+END$$
+
+DELIMITER ;
+
+-- -----------------------------------------------------
 -- procedure zzzRunAllUnitTests
 -- -----------------------------------------------------
 
@@ -2635,6 +2775,8 @@ BEGIN
     END IF;
 
     CALL zzzUnitTestUserUpdates();
+    CALL getAllBooks(); -- Test selecting all fields all books
+    CALL zzzUnitTestDelete ();
     CALL getAllBooks(); -- Test selecting all fields all books
 
 END$$
