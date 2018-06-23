@@ -1,0 +1,24 @@
+﻿<Window x:Class="LibInventoryApp.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:LibInventoryApp"
+        mc:Ignorable="d"
+        Title="MainWindow" Height="350" Width="525">
+    <Grid>
+        <Button x:Name="addFormat_Btn" Content="Add Format" HorizontalAlignment="Left" Margin="50,35,0,0" VerticalAlignment="Top" Width="160"/>
+        <Button x:Name="addCategory_Btn" Content="Add Category" HorizontalAlignment="Left" Margin="50,85,0,0" VerticalAlignment="Top" Width="160"/>
+        <Button x:Name="addAuthor_Btn" Content="Add Author" HorizontalAlignment="Left" Margin="50,135,0,0" VerticalAlignment="Top" Width="160"/>
+        <Button x:Name="addAuthorSeries_Btn" Content="Add Author Series" HorizontalAlignment="Left" Margin="50,185,0,0" VerticalAlignment="Top" Width="160"/>
+        <Button x:Name="readBook_Btn" Content="Read Book" HorizontalAlignment="Left" Margin="50,235,0,0" VerticalAlignment="Top" Width="160"/>
+        <Button x:Name="viewAuthors_Btn" Content="View Authors" HorizontalAlignment="Left" Margin="50,285,0,0" VerticalAlignment="Top" Width="160"/>
+        <Button x:Name="addBook_Btn" Content="Add Book" HorizontalAlignment="Left" Margin="280,35,0,0" VerticalAlignment="Top" Width="160"/>
+        <Button x:Name="buyBook_Btn" Content="Buy Book" HorizontalAlignment="Left" Margin="280,85,0,0" VerticalAlignment="Top" Width="160"/>
+        <Button x:Name="sellBook_Btn" Content="Sell Book" HorizontalAlignment="Left" Margin="280,135,0,0" VerticalAlignment="Top" Width="160"/>
+        <Button x:Name="marketBookBtn" Content="Make Book Available" HorizontalAlignment="Left" Margin="280,185,0,0" VerticalAlignment="Top" Width="160"/>
+        <Button x:Name="BookStatusConditionBtn" Content="Book Status and Condition" HorizontalAlignment="Left" Margin="280,235,0,0" VerticalAlignment="Top" Width="160"/>
+        <Button x:Name="viewBooks_Btn" Content="View Authors" HorizontalAlignment="Left" Margin="280,285,0,0" VerticalAlignment="Top" Width="160"/>
+
+    </Grid>
+</Window>
