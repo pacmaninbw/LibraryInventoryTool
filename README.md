@@ -5,6 +5,15 @@ A MySQL Database with a C# user interface application for maintaining an iventor
 There are multiple unit tests of the stored procedures and stored functions implemented as stored procedures.
 The estimated lines of code of the unit tests is 425, including comments.
 
+#Change History
+7/6/2018 - The one large SQL file "SciFiLibraryInventoryLessPKs.sql" has been broken up into 4 separate files:
+LibInvDDL.sql
+LibInvFuncs.sql
+LibInvProcs.sql
+LibInvUnitTests.sql
+
+I find the code easier to modify and maintain this way. The large file will be kept up to date as well.
+
 # Background
 Two of my hobbies are reading science fiction and designing and coding solutions. I decided to combine these for a project;
 
