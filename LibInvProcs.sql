@@ -90,6 +90,11 @@ BEGIN
     if @authorKey > 0 AND @formatKey > 0 THEN
         SET bookKey = findBookKeyFromKeys(authorKey, titleKey, formatKey);
         IF bookKey < 1 THEN
+            -- Handle the case where the book is wishlisted.
+            -- The formats will be different.
+            SET bookKey = findBookKeyFromKeys(authorKey, titleKey, findFormatKeyFromStr('Not In Library'));
+        END IF;
+        IF bookKey < 1 THEN
             INSERT INTO bookinfo (bookinfo.AuthorFKbi, bookinfo.TitleFKbi, bookinfo.CategoryFKbi, bookinfo.BookFormatFKbi, bookinfo.SeriesFKbi)
                 VALUES (authorKey, titleKey, categoryKey, formatKey, seriesKey);
             SET bookKey := LAST_INSERT_ID();
@@ -204,10 +209,11 @@ BEGIN
     SET @estimatedValue = listPrice - 1.00;
     SET @haveRead = 0, @IsOwned = 1, @IsForSale = 0, @IsWishListed = 0;
     SET @bkStatus = 'New', @bkCondition = 'Excellent';
+    SET @newBookRatings = NULL;
 
     CALL addBookToLibrary(categoryName, authorLastName, authorFirstName, titleStr, bookFormatStr, copyright, iSBNumber, edition, printing, publisher, outOfPrint,
         seriesName, volumeNumber, @bkStatus, @bkCondition, physicalDescStr, iSignedByAuthor, @haveRead, @IsOwned, @IsWishListed, @IsForSale, @estimatedValue, @estimatedValue, 
-        bookDescription, NULL, NULL, NULL, bookKey -- No book ratings when a new book is purchased.
+        bookDescription, @newBookRatings, @newBookRatings, @newBookRatings, bookKey
     );
     IF bookKey IS NOT NULL AND bookKey > 0 THEN
         CALL insertOrUpdatePurchaseInfo(bookKey, purchaseDate, listPrice, pricePaid, vendor);
@@ -673,8 +679,6 @@ CREATE PROCEDURE `addAuthorSeries`
 )
 BEGIN
 
-SET @procName = 'addAuthorSeries';
-
     SET @authorKey = findAuthorKey(authorFirst, authorLast);
 
     IF @authorKey > 0 THEN
@@ -693,6 +697,96 @@ DELIMITER ;
 /*
  * Data retrieval functions and queries.
  */
+
+-- -----------------------------------------------------
+-- procedure getAllBooksInCategory
+-- -----------------------------------------------------
+
+USE `pacswlibinvtool`;
+DROP procedure IF EXISTS `pacswlibinvtool`.`getAllBooksInCategory`;
+
+DELIMITER $$
+USE `pacswlibinvtool`$$
+CREATE PROCEDURE `getAllBooksInCategory`(IN categoryKey INT)
+BEGIN
+
+    SELECT
+            BKI.idBookInfo, a.*, t.*, bf.*, BCat.*,
+            pub.ISBNumber, pub.Copyright, pub.Edition, pub.Publisher, pub.OutOfPrint, pub.Printing,
+            s.*, v.VolumeNumber,
+            pur.PurchaseDate, pur.ListPrice, pur.PaidPrice, pur.Vendor,
+            bc.IsSignedByAuthor, bCondStr.ConditionOfBookStr, bstat.BkStatusStr, bc.PhysicalDescriptionStr,
+            o.IsOwned, o.IsWishListed,
+            fs.IsForSale, fs.AskingPrice, fs.EstimatedValue,
+            rts.MyRatings, rts.AmazonRatings, rts.GoodReadsRatings,
+            BDesk.StoryLine
+        FROM bookinfo AS BKI 
+        INNER JOIN authorsTab AS a ON a.idAuthors = BKI.AuthorFKbi
+        INNER JOIN title AS t ON t.idTitle = BKI.TitleFKbi
+        INNER JOIN bookformat AS bf ON bf.idFormat = BKI.BookFormatFKBi
+        INNER JOIN bookcategories AS BCat ON BCat.idBookCategories = BKI.CategoryFKbI
+        LEFT JOIN bookcondition AS bc ON bc.BookFKCond = BKI.idBookInfo
+        LEFT JOIN bkconditions AS bCondStr ON bc.ConditionOfBook = bCondStr.idBkConditions
+        LEFT JOIN bkstatuses AS bstat ON bc.NewOrUsed = bstat.idBkStatus
+        LEFT JOIN publishinginfo AS pub ON pub.BookFKPubI = BKI.idBookInfo
+        LEFT JOIN purchaseinfo AS pur ON pur.BookFKPurI = BKI.idBookInfo
+        LEFT JOIN series AS s ON s.idSeries = BKI.SeriesFKbi
+        LEFT JOIN volumeinseries AS v ON v.BookFKvs = BKI.idBookInfo
+        LEFT JOIN owned AS o ON o.BookFKo = BKI.idBookInfo
+        LEFT JOIN forsale AS fs ON fs.BookFKfs = BKI.idBookInfo
+        LEFT JOIN bksynopsis AS BDesk ON BDesk.BookFKsyop = BKI.idBookInfo 
+        LEFT JOIN ratings AS rts ON rts.BookFKRats = BKI.idBookInfo 
+        WHERE BKI.CategoryFKbI = categoryKey
+        ORDER BY a.LastName ASC, a.FirstName ASC, s.SeriesName ASC, v.VolumeNumber ASC, t.TitleStr ASC;
+    
+END$$
+
+DELIMITER ;
+
+-- -----------------------------------------------------
+-- procedure getAllBooksInCategorySortedByMyRatings
+-- -----------------------------------------------------
+
+USE `pacswlibinvtool`;
+DROP procedure IF EXISTS `pacswlibinvtool`.`getAllBooksInCategorySortedByMyRatings`;
+
+DELIMITER $$
+USE `pacswlibinvtool`$$
+CREATE PROCEDURE `getAllBooksInCategorySortedByMyRatings`(IN categoryKey INT)
+BEGIN
+
+    SELECT
+            BKI.idBookInfo, a.*, t.*, bf.*, BCat.*,
+            pub.ISBNumber, pub.Copyright, pub.Edition, pub.Publisher, pub.OutOfPrint, pub.Printing,
+            s.*, v.VolumeNumber,
+            pur.PurchaseDate, pur.ListPrice, pur.PaidPrice, pur.Vendor,
+            bc.IsSignedByAuthor, bCondStr.ConditionOfBookStr, bstat.BkStatusStr, bc.PhysicalDescriptionStr,
+            o.IsOwned, o.IsWishListed,
+            fs.IsForSale, fs.AskingPrice, fs.EstimatedValue,
+            rts.MyRatings, rts.AmazonRatings, rts.GoodReadsRatings,
+            BDesk.StoryLine
+        FROM bookinfo AS BKI 
+        INNER JOIN authorsTab AS a ON a.idAuthors = BKI.AuthorFKbi
+        INNER JOIN title AS t ON t.idTitle = BKI.TitleFKbi
+        INNER JOIN bookformat AS bf ON bf.idFormat = BKI.BookFormatFKBi
+        INNER JOIN bookcategories AS BCat ON BCat.idBookCategories = categoryKey
+        LEFT JOIN bookcondition AS bc ON bc.BookFKCond = BKI.idBookInfo
+        LEFT JOIN bkconditions AS bCondStr ON bc.ConditionOfBook = bCondStr.idBkConditions
+        LEFT JOIN bkstatuses AS bstat ON bc.NewOrUsed = bstat.idBkStatus
+        LEFT JOIN publishinginfo AS pub ON pub.BookFKPubI = BKI.idBookInfo
+        LEFT JOIN purchaseinfo AS pur ON pur.BookFKPurI = BKI.idBookInfo
+        LEFT JOIN series AS s ON s.idSeries = BKI.SeriesFKbi
+        LEFT JOIN volumeinseries AS v ON v.BookFKvs = BKI.idBookInfo
+        LEFT JOIN owned AS o ON o.BookFKo = BKI.idBookInfo
+        LEFT JOIN forsale AS fs ON fs.BookFKfs = BKI.idBookInfo
+        LEFT JOIN bksynopsis AS BDesk ON BDesk.BookFKsyop = BKI.idBookInfo 
+        LEFT JOIN ratings AS rts ON rts.BookFKRats = BKI.idBookInfo 
+        WHERE BKI.CategoryFKbI = categoryKey
+        ORDER BY rts.MyRatings DESC, a.LastName ASC, a.FirstName ASC, s.SeriesName ASC, v.VolumeNumber ASC, t.TitleStr ASC;
+    
+END$$
+
+DELIMITER ;
 
 -- -----------------------------------------------------
 -- procedure getAllBookDataSortedByMyRatings

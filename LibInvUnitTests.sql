@@ -624,6 +624,8 @@ BEGIN
         CALL getRatedBooksSortedByAmazonRating();
         CALL getRatedBooksSortedByGoodReadsRating();
         CALL getAllBookDataSortedByMyRatings();
+        CALL getAllBooksInCategory(findCategoryKeyFromStr('Non-Fiction: Computer'));
+        CALL getAllBooksInCategorySortedByMyRatings(findCategoryKeyFromStr('Fiction: Science Fiction'));
     END IF;
 
     CALL zzzUnitTestUserUpdates();
